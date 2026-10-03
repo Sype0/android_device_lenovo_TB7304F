@@ -90,6 +90,13 @@ jobs:
           docker exec build bash -c "mkdir -p /src/$(dirname "$DEVICE_PATH") && rm -rf /src/$DEVICE_PATH &&
             cp -a /tree /src/$DEVICE_PATH && rm -rf /src/$DEVICE_PATH/.git /src/$DEVICE_PATH/.github"
 
+      - name: Build the Bluetooth app 32-bit
+        # The stock libbt-vendor.so only exists as a 32-bit library
+        run: |
+          docker exec build bash -c 'cd /src/packages/apps/Bluetooth &&
+            sed -i "s/^include \$(BUILD_PACKAGE)/LOCAL_MULTILIB := 32\n&/" Android.mk &&
+            grep -B1 "^include \$(BUILD_PACKAGE)" Android.mk && grep -q "^LOCAL_MULTILIB := 32" Android.mk'
+
       - name: Build
         run: |
           docker exec -e DEVICE="$DEVICE" build bash /src/in-container.sh bash -c '
