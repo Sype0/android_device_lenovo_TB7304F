@@ -7,6 +7,10 @@ on:
     paths-ignore: ['**.md']
   workflow_dispatch:
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   stage1:
     uses: ./.github/workflows/stage.yml
