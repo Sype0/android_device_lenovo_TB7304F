@@ -1,5 +1,5 @@
 diff --git a/IPCThreadState.cpp b/IPCThreadState.cpp
-index b9ca20a..11a2e69 100644
+index b9ca20a..479975b 100644
 --- a/IPCThreadState.cpp
 +++ b/IPCThreadState.cpp
 @@ -36,6 +36,8 @@
@@ -11,7 +11,7 @@ index b9ca20a..11a2e69 100644
  #include <sys/ioctl.h>
  #include <sys/resource.h>
  #include <unistd.h>
-@@ -277,6 +279,282 @@ static pthread_key_t gTLS = 0;
+@@ -277,6 +279,283 @@ static pthread_key_t gTLS = 0;
  static bool gShutdown = false;
  static bool gDisableBackgroundScheduling = false;
  
@@ -66,13 +66,14 @@ index b9ca20a..11a2e69 100644
 +    return (size + 7) & ~static_cast<size_t>(7);
 +}
 +
-+// Translates the parcel into a single block for the kernel. Returns NULL when
-+// the parcel has no buffers and can go out as it is.
-+void* usgExport(const Parcel& parcel, binder_transaction_data* tr) {
-+    const uint8_t* base = reinterpret_cast<const uint8_t*>(parcel.ipcData());
-+    const binder_size_t* objects = reinterpret_cast<const binder_size_t*>(parcel.ipcObjects());
-+    const size_t count = parcel.ipcObjectsCount();
-+    const size_t dataSize = parcel.ipcDataSize();
++// Translates the parcel that the transaction data refers to into a single
++// block for the kernel. Returns NULL when the parcel has no buffers and can go
++// out as it is.
++void* usgExport(binder_transaction_data* tr) {
++    const uint8_t* base = reinterpret_cast<const uint8_t*>(tr->data.ptr.buffer);
++    const binder_size_t* objects = reinterpret_cast<const binder_size_t*>(tr->data.ptr.offsets);
++    const size_t count = tr->offsets_size / sizeof(binder_size_t);
++    const size_t dataSize = tr->data_size;
 +
 +    size_t buffersSize = 0, fdsCount = 0, kernelCount = 0;
 +    bool needed = false;
@@ -294,7 +295,7 @@ index b9ca20a..11a2e69 100644
  IPCThreadState* IPCThreadState::self()
  {
      if (gHaveTLS) {
-@@ -709,6 +987,7 @@ IPCThreadState::IPCThreadState()
+@@ -709,6 +988,7 @@ IPCThreadState::IPCThreadState()
  
  IPCThreadState::~IPCThreadState()
  {
@@ -302,7 +303,7 @@ index b9ca20a..11a2e69 100644
  }
  
  status_t IPCThreadState::sendReply(const Parcel& reply, uint32_t flags)
-@@ -768,28 +1047,30 @@ status_t IPCThreadState::waitForResponse(Parcel *reply, status_t *acquireResult)
+@@ -768,28 +1048,30 @@ status_t IPCThreadState::waitForResponse(Parcel *reply, status_t *acquireResult)
                  ALOG_ASSERT(err == NO_ERROR, "Not enough command data for brREPLY");
                  if (err != NO_ERROR) goto finish;
  
@@ -347,7 +348,7 @@ index b9ca20a..11a2e69 100644
                      continue;
                  }
              }
-@@ -889,8 +1170,10 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
+@@ -889,8 +1171,10 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
          if (bwr.write_consumed > 0) {
              if (bwr.write_consumed < mOut.dataSize())
                  mOut.remove(0, bwr.write_consumed);
@@ -359,7 +360,7 @@ index b9ca20a..11a2e69 100644
          }
          if (bwr.read_consumed > 0) {
              mIn.setDataSize(bwr.read_consumed);
-@@ -914,36 +1197,37 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
+@@ -914,36 +1198,37 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
  status_t IPCThreadState::writeTransactionData(int32_t cmd, uint32_t binderFlags,
      int32_t handle, uint32_t code, const Parcel& data, status_t* statusBuffer)
  {
@@ -392,7 +393,7 @@ index b9ca20a..11a2e69 100644
 +        tr.offsets_size = data.ipcObjectsCount()*sizeof(binder_size_t);
 +        tr.data.ptr.offsets = data.ipcObjects();
 +        // The kernel has no BC_TRANSACTION_SG, the buffers travel in the data
-+        void* translated = usgExport(data, &tr);
++        void* translated = usgExport(&tr);
 +        if (translated != NULL) mUsgPending.push(translated);
      } else if (statusBuffer) {
 -        tr_sg.tr.flags |= TF_STATUS_CODE;
@@ -418,7 +419,7 @@ index b9ca20a..11a2e69 100644
  
      return NO_ERROR;
  }
-@@ -1048,12 +1332,16 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
+@@ -1048,12 +1333,16 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
                  "Not enough command data for brTRANSACTION");
              if (result != NO_ERROR) break;
  
@@ -440,7 +441,7 @@ index b9ca20a..11a2e69 100644
  
              const pid_t origPid = mCallingPid;
              const char* origSid = mCallingSid;
-@@ -1213,6 +1501,18 @@ void IPCThreadState::freeBuffer(Parcel* parcel, const uint8_t* data,
+@@ -1213,6 +1502,18 @@ void IPCThreadState::freeBuffer(Parcel* parcel, const uint8_t* data,
      ALOG_ASSERT(data != NULL, "Called with NULL data");
      if (parcel != NULL) parcel->closeFileDescriptors();
      IPCThreadState* state = self();
