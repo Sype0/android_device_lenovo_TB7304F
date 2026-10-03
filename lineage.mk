@@ -5,6 +5,10 @@ $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base.mk)
 # Inherit from TB7304F device
 $(call inherit-product, device/lenovo/TB7304F/device.mk)
 
+# Boot animation size
+TARGET_SCREEN_WIDTH := 600
+TARGET_SCREEN_HEIGHT := 1024
+
 # Inherit some common LineageOS stuff.
 $(call inherit-product, vendor/cm/config/common_full_tablet_wifionly.mk)
 

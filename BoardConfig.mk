@@ -77,7 +77,11 @@ WIFI_DRIVER_FW_PATH_P2P := P2P
 # The stock blobs were built against Android 7.0, libmtk_symbols carries the
 # symbols that changed in 7.1
 LINKER_FORCED_SHIM_LIBS := \
-    /system/vendor/lib/libui_ext.so|libmtk_symbols.so:/system/vendor/lib64/libui_ext.so|libmtk_symbols.so:/system/vendor/lib/libcam.client.so|libmtk_symbols.so:/system/vendor/lib64/libcam.client.so|libmtk_symbols.so:/system/vendor/lib/libcam_utils.so|libmtk_symbols.so:/system/vendor/lib64/libcam_utils.so|libmtk_symbols.so:/system/vendor/lib/libmtk_mmutils.so|libmtk_symbols.so:/system/vendor/lib64/libmtk_mmutils.so|libmtk_symbols.so:/system/vendor/lib/libMtkOmxVenc.so|libmtk_symbols.so
+    /system/vendor/lib/libui_ext.so|libmtk_symbols.so:/system/vendor/lib64/libui_ext.so|libmtk_symbols.so:/system/vendor/lib/libcam.client.so|libmtk_symbols.so:/system/vendor/lib64/libcam.client.so|libmtk_symbols.so:/system/vendor/lib/libcam_utils.so|libmtk_symbols.so:/system/vendor/lib64/libcam_utils.so|libmtk_symbols.so:/system/vendor/lib/libmtk_mmutils.so|libmtk_symbols.so:/system/vendor/lib64/libmtk_mmutils.so|libmtk_symbols.so:/system/vendor/lib/libMtkOmxVenc.so|libmtk_symbols.so:/system/vendor/bin/thermal|libmtk_ifc.so
+
+# Without it the framework is compiled on the first boot, which takes very
+# long on this device
+WITH_DEXPREOPT := true
 
 # SELinux
 BOARD_SEPOLICY_DIRS += $(DEVICE_PATH)/sepolicy

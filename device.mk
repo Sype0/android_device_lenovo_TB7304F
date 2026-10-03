@@ -16,9 +16,14 @@ PRODUCT_COPY_FILES += \
 PRODUCT_COPY_FILES += \
     $(call find-copy-subdir-files,*,$(LOCAL_PATH)/rootdir,root)
 
-# Shim for the 7.0 blobs
+# Shims for the 7.0 blobs
 PRODUCT_PACKAGES += \
-    libmtk_symbols
+    libmtk_symbols \
+    libmtk_ifc
+
+# GPS (mnld)
+PRODUCT_PACKAGES += \
+    libcurl
 
 # Graphics
 PRODUCT_PACKAGES += \
