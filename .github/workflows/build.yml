@@ -2,6 +2,9 @@
 name: Build LineageOS
 
 on:
+  push:
+    branches: [cm-14.1]
+    paths-ignore: ['**.md']
   workflow_dispatch:
 
 env:
