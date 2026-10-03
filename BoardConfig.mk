@@ -27,6 +27,7 @@ BOARD_USES_MTK_HARDWARE := true
 # Kernel (stock 4.4.22, TB-7304F_S100017_200102_ROW): there is no kernel
 # source for this board
 TARGET_PREBUILT_KERNEL := $(DEVICE_PATH)/prebuilt/kernel
+BOARD_KERNEL_IMAGE_NAME := Image.gz-dtb
 BOARD_KERNEL_BASE := 0x40078000
 BOARD_KERNEL_CMDLINE := bootopt=64S3,32N2,64N2 androidboot.selinux=permissive
 BOARD_KERNEL_PAGESIZE := 2048
