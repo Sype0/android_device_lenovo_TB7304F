@@ -84,7 +84,10 @@ jobs:
         run: |
           docker exec build bash /src/in-container.sh bash -c '
             repo init --depth=1 -u https://github.com/LineageOS/android.git -b lineage-15.1 -g default,-darwin &&
-            repo sync -c -j8 --force-sync --no-clone-bundle --no-tags &&
+            for attempt in 1 2 3 4 5 6; do
+              repo sync -c -j6 --force-sync --no-clone-bundle --no-tags && break
+              echo "Sync attempt $attempt failed" && sleep 60
+            done
             test -f build/envsetup.sh &&
             for d in external/chromium-webview/prebuilt/arm external/chromium-webview/prebuilt/arm64; do
               if ! unzip -tq $d/webview.apk > /dev/null 2>&1; then
