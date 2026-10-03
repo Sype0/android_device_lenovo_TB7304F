@@ -1,0 +1,568 @@
+diff --git a/IPCThreadState.cpp b/IPCThreadState.cpp
+index b9ca20a..11a2e69 100644
+--- a/IPCThreadState.cpp
++++ b/IPCThreadState.cpp
+@@ -36,6 +36,8 @@
+ #include <sched.h>
+ #include <signal.h>
+ #include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
+ #include <sys/ioctl.h>
+ #include <sys/resource.h>
+ #include <unistd.h>
+@@ -277,6 +279,282 @@ static pthread_key_t gTLS = 0;
+ static bool gShutdown = false;
+ static bool gDisableBackgroundScheduling = false;
+ 
++// ---------------------------------------------------------------------------
++// Scatter-gather emulation
++//
++// HIDL passes its buffers and native handles as BINDER_TYPE_PTR and
++// BINDER_TYPE_FDA objects, which the binder driver copies into the receiver
++// and fixes up there (BC_TRANSACTION_SG). The stock 4.4.22 kernel of this
++// device predates that, and there is no source to add it to. The same job is
++// done here in user space instead: the sender appends the buffers to the
++// transaction data and the receiver fixes the pointers up in a private copy.
++//
++// Data of a translated transaction:
++//
++//   [0, dataSize)        the parcel, with the buffer field of every
++//                        BINDER_TYPE_PTR object holding an offset into this
++//                        block in place of a pointer
++//   buffers              8-byte aligned copies of the buffers
++//   fds                  one flat_binder_object of BINDER_TYPE_FD for every
++//                        descriptor of every BINDER_TYPE_FDA object; these are
++//                        what the kernel translates
++//   objects              the object offsets of the parcel
++//   UsgTrailer
++//
++// The kernel only gets to see the offsets of the object types it knows.
++
++namespace {
++
++const uint64_t kUsgMagic0 = 0x4753555f52444942ULL; // "BIDR_USG"
++const uint64_t kUsgMagic1 = 0x9e3779b97f4a7c15ULL;
++
++struct UsgTrailer {
++    uint64_t dataSize;
++    uint64_t objectsOffset;
++    uint64_t objectsCount;
++    uint64_t fdsOffset;
++    uint64_t fdsCount;
++    uint64_t magic0;
++    uint64_t magic1;
++};
++
++// Precedes the receiver's copy of the data
++struct UsgHeader {
++    uint64_t kernelData;
++    uint64_t fdsOffset;
++    uint64_t fdsCount;
++    uint64_t reserved;
++};
++
++inline size_t usgAlign(size_t size) {
++    return (size + 7) & ~static_cast<size_t>(7);
++}
++
++// Translates the parcel into a single block for the kernel. Returns NULL when
++// the parcel has no buffers and can go out as it is.
++void* usgExport(const Parcel& parcel, binder_transaction_data* tr) {
++    const uint8_t* base = reinterpret_cast<const uint8_t*>(parcel.ipcData());
++    const binder_size_t* objects = reinterpret_cast<const binder_size_t*>(parcel.ipcObjects());
++    const size_t count = parcel.ipcObjectsCount();
++    const size_t dataSize = parcel.ipcDataSize();
++
++    size_t buffersSize = 0, fdsCount = 0, kernelCount = 0;
++    bool needed = false;
++    for (size_t i = 0; i < count; i++) {
++        const binder_object_header* hdr =
++                reinterpret_cast<const binder_object_header*>(base + objects[i]);
++        if (hdr->type == BINDER_TYPE_PTR) {
++            buffersSize += usgAlign(reinterpret_cast<const binder_buffer_object*>(hdr)->length);
++            needed = true;
++        } else if (hdr->type == BINDER_TYPE_FDA) {
++            fdsCount += reinterpret_cast<const binder_fd_array_object*>(hdr)->num_fds;
++            needed = true;
++        } else {
++            kernelCount++;
++        }
++    }
++    if (!needed) return NULL;
++
++    const size_t buffersOffset = usgAlign(dataSize);
++    const size_t fdsOffset = buffersOffset + buffersSize;
++    const size_t objectsOffset = fdsOffset + fdsCount * sizeof(flat_binder_object);
++    const size_t trailerOffset = objectsOffset + count * sizeof(binder_size_t);
++    const size_t total = trailerOffset + sizeof(UsgTrailer);
++
++    uint8_t* blob = static_cast<uint8_t*>(
++            calloc(1, total + (kernelCount + fdsCount) * sizeof(binder_size_t)));
++    LOG_ALWAYS_FATAL_IF(blob == NULL, "Out of memory translating a transaction of %zu bytes",
++                        total);
++    binder_size_t* kernelObjects = reinterpret_cast<binder_size_t*>(blob + total);
++
++    memcpy(blob, base, dataSize);
++
++    size_t pos = buffersOffset, k = 0;
++    for (size_t i = 0; i < count; i++) {
++        binder_object_header* hdr = reinterpret_cast<binder_object_header*>(blob + objects[i]);
++        if (hdr->type == BINDER_TYPE_PTR) {
++            binder_buffer_object* obj = reinterpret_cast<binder_buffer_object*>(hdr);
++            if (obj->length > 0) {
++                memcpy(blob + pos, reinterpret_cast<const void*>(obj->buffer), obj->length);
++            }
++            obj->buffer = pos;
++            pos += usgAlign(obj->length);
++        } else if (hdr->type != BINDER_TYPE_FDA) {
++            kernelObjects[k++] = objects[i];
++        }
++    }
++
++    size_t fd = 0;
++    for (size_t i = 0; i < count; i++) {
++        const binder_fd_array_object* fda =
++                reinterpret_cast<const binder_fd_array_object*>(base + objects[i]);
++        if (fda->hdr.type != BINDER_TYPE_FDA || fda->num_fds == 0) continue;
++        LOG_ALWAYS_FATAL_IF(fda->parent >= count, "File descriptor array without a parent");
++        const binder_buffer_object* parent =
++                reinterpret_cast<const binder_buffer_object*>(base + objects[fda->parent]);
++        LOG_ALWAYS_FATAL_IF(parent->hdr.type != BINDER_TYPE_PTR,
++                            "The parent of a file descriptor array is not a buffer");
++        const uint8_t* fds = reinterpret_cast<const uint8_t*>(parent->buffer) + fda->parent_offset;
++        for (size_t j = 0; j < fda->num_fds; j++, fd++) {
++            const size_t offset = fdsOffset + fd * sizeof(flat_binder_object);
++            flat_binder_object* flat = reinterpret_cast<flat_binder_object*>(blob + offset);
++            int value;
++            memcpy(&value, fds + j * sizeof(int), sizeof(int));
++            flat->type = BINDER_TYPE_FD;
++            flat->flags = 0x7f | FLAT_BINDER_FLAG_ACCEPTS_FDS;
++            flat->handle = value;
++            kernelObjects[k++] = offset;
++        }
++    }
++
++    memcpy(blob + objectsOffset, objects, count * sizeof(binder_size_t));
++
++    UsgTrailer trailer;
++    trailer.dataSize = dataSize;
++    trailer.objectsOffset = objectsOffset;
++    trailer.objectsCount = count;
++    trailer.fdsOffset = fdsOffset;
++    trailer.fdsCount = fdsCount;
++    trailer.magic0 = kUsgMagic0;
++    trailer.magic1 = kUsgMagic1;
++    memcpy(blob + trailerOffset, &trailer, sizeof(trailer));
++
++    tr->data_size = total;
++    tr->data.ptr.buffer = reinterpret_cast<uintptr_t>(blob);
++    tr->offsets_size = k * sizeof(binder_size_t);
++    tr->data.ptr.offsets = reinterpret_cast<uintptr_t>(kernelObjects);
++    return blob;
++}
++
++// The receiving side of usgExport(): if the kernel buffer holds a translated
++// transaction, replaces it with a heap copy whose pointers and file
++// descriptors are fixed up. IPCThreadState::freeBuffer() releases both.
++void usgImport(const uint8_t** data, size_t* dataSize, const binder_size_t** objects,
++               size_t* objectsCount) {
++    const uint8_t* kernelData = *data;
++    const size_t size = *dataSize;
++    if (kernelData == NULL || size < sizeof(UsgTrailer) || (size & 7) != 0) return;
++
++    UsgTrailer t;
++    const size_t end = size - sizeof(t);
++    memcpy(&t, kernelData + end, sizeof(t));
++    if (t.magic0 != kUsgMagic0 || t.magic1 != kUsgMagic1) return;
++
++    bool valid = t.dataSize <= end && t.objectsOffset <= end && t.fdsOffset <= end
++            && (t.objectsOffset & 7) == 0 && (t.fdsOffset & 7) == 0
++            && t.objectsCount <= (end - t.objectsOffset) / sizeof(binder_size_t)
++            && t.fdsCount <= (end - t.fdsOffset) / sizeof(flat_binder_object);
++    if (!valid) {
++        // Nothing here can be trusted, not even the descriptors to close
++        t.dataSize = t.objectsOffset = t.objectsCount = t.fdsOffset = t.fdsCount = 0;
++    }
++
++    UsgHeader* header = static_cast<UsgHeader*>(malloc(sizeof(UsgHeader) + size));
++    LOG_ALWAYS_FATAL_IF(header == NULL, "Out of memory receiving a transaction of %zu bytes",
++                        size);
++    uint8_t* copy = reinterpret_cast<uint8_t*>(header + 1);
++    memcpy(copy, kernelData, size);
++    header->kernelData = reinterpret_cast<uintptr_t>(kernelData);
++    header->fdsOffset = t.fdsOffset;
++    header->fdsCount = t.fdsCount;
++    header->reserved = 0;
++
++    binder_size_t* offsets = reinterpret_cast<binder_size_t*>(copy + t.objectsOffset);
++    size_t fd = 0;
++    for (size_t i = 0; valid && i < t.objectsCount; i++) {
++        const binder_size_t offset = offsets[i];
++        if (offset > t.dataSize || t.dataSize - offset < sizeof(flat_binder_object)) {
++            valid = false;
++            break;
++        }
++        binder_object_header* hdr = reinterpret_cast<binder_object_header*>(copy + offset);
++        if (hdr->type != BINDER_TYPE_PTR && hdr->type != BINDER_TYPE_FDA) continue;
++
++        binder_buffer_object* obj = reinterpret_cast<binder_buffer_object*>(hdr);
++        binder_fd_array_object* fda = reinterpret_cast<binder_fd_array_object*>(hdr);
++        const bool isBuffer = hdr->type == BINDER_TYPE_PTR;
++        if (t.dataSize - offset < (isBuffer ? sizeof(*obj) : sizeof(*fda))) {
++            valid = false;
++            break;
++        }
++
++        if (isBuffer) {
++            if (obj->buffer > end || obj->length > end - obj->buffer) {
++                valid = false;
++                break;
++            }
++            obj->buffer = reinterpret_cast<uintptr_t>(copy + obj->buffer);
++            if ((obj->flags & BINDER_BUFFER_HAS_PARENT) == 0) continue;
++        }
++
++        const binder_size_t parentIndex = isBuffer ? obj->parent : fda->parent;
++        const binder_size_t parentOffset = isBuffer ? obj->parent_offset : fda->parent_offset;
++        if (parentIndex >= i) {
++            valid = false;
++            break;
++        }
++        // Earlier objects have been checked and fixed up already
++        const binder_buffer_object* parent =
++                reinterpret_cast<const binder_buffer_object*>(copy + offsets[parentIndex]);
++        if (parent->hdr.type != BINDER_TYPE_PTR || parentOffset > parent->length) {
++            valid = false;
++            break;
++        }
++        uint8_t* target = reinterpret_cast<uint8_t*>(parent->buffer) + parentOffset;
++        const binder_size_t room = parent->length - parentOffset;
++
++        if (isBuffer) {
++            if (room < sizeof(uint64_t)) {
++                valid = false;
++                break;
++            }
++            const uint64_t pointer = obj->buffer;
++            memcpy(target, &pointer, sizeof(pointer));
++        } else {
++            if (fda->num_fds > t.fdsCount - fd || fda->num_fds > room / sizeof(int)) {
++                valid = false;
++                break;
++            }
++            for (size_t j = 0; j < fda->num_fds; j++, fd++) {
++                const flat_binder_object* flat = reinterpret_cast<const flat_binder_object*>(
++                        copy + t.fdsOffset + fd * sizeof(flat_binder_object));
++                const int value = flat->handle;
++                memcpy(target + j * sizeof(int), &value, sizeof(int));
++            }
++        }
++    }
++
++    if (!valid) {
++        ALOGE("Malformed translated transaction of %zu bytes", size);
++    }
++
++    *data = copy;
++    *dataSize = t.dataSize;
++    *objects = offsets;
++    *objectsCount = valid ? t.objectsCount : 0;
++}
++
++} // namespace
++
++void IPCThreadState::freeUsgPending()
++{
++    for (size_t i = 0; i < mUsgPending.size(); i++) {
++        free(mUsgPending[i]);
++    }
++    mUsgPending.clear();
++}
++
++status_t IPCThreadState::publishContextObject()
++{
++    Parcel data, reply;
++    data.writeInt32(0 /* strict mode policy */);
++    data.writeString16(String16("android.os.IServiceManager"));
++    data.writeString16(String16("hwservicemanager"));
++    data.writeStrongBinder(mContextObject);
++    data.writeInt32(1 /* allowIsolated */);
++    return transact(0, 3 /* ADD_SERVICE_TRANSACTION */, data, &reply, 0);
++}
++
+ IPCThreadState* IPCThreadState::self()
+ {
+     if (gHaveTLS) {
+@@ -709,6 +987,7 @@ IPCThreadState::IPCThreadState()
+ 
+ IPCThreadState::~IPCThreadState()
+ {
++    freeUsgPending();
+ }
+ 
+ status_t IPCThreadState::sendReply(const Parcel& reply, uint32_t flags)
+@@ -768,28 +1047,30 @@ status_t IPCThreadState::waitForResponse(Parcel *reply, status_t *acquireResult)
+                 ALOG_ASSERT(err == NO_ERROR, "Not enough command data for brREPLY");
+                 if (err != NO_ERROR) goto finish;
+ 
++                const uint8_t* replyData = reinterpret_cast<const uint8_t*>(tr.data.ptr.buffer);
++                size_t replySize = tr.data_size;
++                const binder_size_t* replyObjects =
++                        reinterpret_cast<const binder_size_t*>(tr.data.ptr.offsets);
++                size_t replyObjectsCount = tr.offsets_size/sizeof(binder_size_t);
++
+                 if (reply) {
+                     if ((tr.flags & TF_STATUS_CODE) == 0) {
++                        usgImport(&replyData, &replySize, &replyObjects, &replyObjectsCount);
+                         reply->ipcSetDataReference(
+-                            reinterpret_cast<const uint8_t*>(tr.data.ptr.buffer),
+-                            tr.data_size,
+-                            reinterpret_cast<const binder_size_t*>(tr.data.ptr.offsets),
+-                            tr.offsets_size/sizeof(binder_size_t),
++                            replyData, replySize, replyObjects, replyObjectsCount,
+                             freeBuffer, this);
+                     } else {
+                         err = *reinterpret_cast<const status_t*>(tr.data.ptr.buffer);
+-                        freeBuffer(NULL,
+-                            reinterpret_cast<const uint8_t*>(tr.data.ptr.buffer),
+-                            tr.data_size,
+-                            reinterpret_cast<const binder_size_t*>(tr.data.ptr.offsets),
+-                            tr.offsets_size/sizeof(binder_size_t), this);
++                        freeBuffer(NULL, replyData, replySize, replyObjects,
++                            replyObjectsCount, this);
+                     }
+                 } else {
+-                    freeBuffer(NULL,
+-                        reinterpret_cast<const uint8_t*>(tr.data.ptr.buffer),
+-                        tr.data_size,
+-                        reinterpret_cast<const binder_size_t*>(tr.data.ptr.offsets),
+-                        tr.offsets_size/sizeof(binder_size_t), this);
++                    // Translated replies carry file descriptors to close
++                    if ((tr.flags & TF_STATUS_CODE) == 0) {
++                        usgImport(&replyData, &replySize, &replyObjects, &replyObjectsCount);
++                    }
++                    freeBuffer(NULL, replyData, replySize, replyObjects,
++                        replyObjectsCount, this);
+                     continue;
+                 }
+             }
+@@ -889,8 +1170,10 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
+         if (bwr.write_consumed > 0) {
+             if (bwr.write_consumed < mOut.dataSize())
+                 mOut.remove(0, bwr.write_consumed);
+-            else
++            else {
+                 mOut.setDataSize(0);
++                freeUsgPending();
++            }
+         }
+         if (bwr.read_consumed > 0) {
+             mIn.setDataSize(bwr.read_consumed);
+@@ -914,36 +1197,37 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
+ status_t IPCThreadState::writeTransactionData(int32_t cmd, uint32_t binderFlags,
+     int32_t handle, uint32_t code, const Parcel& data, status_t* statusBuffer)
+ {
+-    binder_transaction_data_sg tr_sg;
+-    tr_sg.tr.target.ptr = 0; /* Don't pass uninitialized stack data to a remote process */
+-    tr_sg.tr.target.handle = handle;
+-    tr_sg.tr.code = code;
+-    tr_sg.tr.flags = binderFlags;
+-    tr_sg.tr.cookie = 0;
+-    tr_sg.tr.sender_pid = 0;
+-    tr_sg.tr.sender_euid = 0;
++    binder_transaction_data tr;
++    tr.target.ptr = 0; /* Don't pass uninitialized stack data to a remote process */
++    tr.target.handle = handle;
++    tr.code = code;
++    tr.flags = binderFlags;
++    tr.cookie = 0;
++    tr.sender_pid = 0;
++    tr.sender_euid = 0;
+ 
+     const status_t err = data.errorCheck();
+     if (err == NO_ERROR) {
+-        tr_sg.tr.data_size = data.ipcDataSize();
+-        tr_sg.tr.data.ptr.buffer = data.ipcData();
+-        tr_sg.tr.offsets_size = data.ipcObjectsCount()*sizeof(binder_size_t);
+-        tr_sg.tr.data.ptr.offsets = data.ipcObjects();
+-        tr_sg.buffers_size = data.ipcBufferSize();
++        tr.data_size = data.ipcDataSize();
++        tr.data.ptr.buffer = data.ipcData();
++        tr.offsets_size = data.ipcObjectsCount()*sizeof(binder_size_t);
++        tr.data.ptr.offsets = data.ipcObjects();
++        // The kernel has no BC_TRANSACTION_SG, the buffers travel in the data
++        void* translated = usgExport(data, &tr);
++        if (translated != NULL) mUsgPending.push(translated);
+     } else if (statusBuffer) {
+-        tr_sg.tr.flags |= TF_STATUS_CODE;
++        tr.flags |= TF_STATUS_CODE;
+         *statusBuffer = err;
+-        tr_sg.tr.data_size = sizeof(status_t);
+-        tr_sg.tr.data.ptr.buffer = reinterpret_cast<uintptr_t>(statusBuffer);
+-        tr_sg.tr.offsets_size = 0;
+-        tr_sg.tr.data.ptr.offsets = 0;
+-        tr_sg.buffers_size = 0;
++        tr.data_size = sizeof(status_t);
++        tr.data.ptr.buffer = reinterpret_cast<uintptr_t>(statusBuffer);
++        tr.offsets_size = 0;
++        tr.data.ptr.offsets = 0;
+     } else {
+         return (mLastError = err);
+     }
+ 
+-    mOut.writeInt32(cmd);
+-    mOut.write(&tr_sg, sizeof(tr_sg));
++    mOut.writeInt32(cmd == (int32_t) BC_REPLY_SG ? BC_REPLY : BC_TRANSACTION);
++    mOut.write(&tr, sizeof(tr));
+ 
+     return NO_ERROR;
+ }
+@@ -1048,12 +1332,16 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
+                 "Not enough command data for brTRANSACTION");
+             if (result != NO_ERROR) break;
+ 
++            const uint8_t* trData = reinterpret_cast<const uint8_t*>(tr.data.ptr.buffer);
++            size_t trSize = tr.data_size;
++            const binder_size_t* trObjects =
++                    reinterpret_cast<const binder_size_t*>(tr.data.ptr.offsets);
++            size_t trObjectsCount = tr.offsets_size/sizeof(binder_size_t);
++            usgImport(&trData, &trSize, &trObjects, &trObjectsCount);
++
+             Parcel buffer;
+-            buffer.ipcSetDataReference(
+-                reinterpret_cast<const uint8_t*>(tr.data.ptr.buffer),
+-                tr.data_size,
+-                reinterpret_cast<const binder_size_t*>(tr.data.ptr.offsets),
+-                tr.offsets_size/sizeof(binder_size_t), freeBuffer, this);
++            buffer.ipcSetDataReference(trData, trSize, trObjects, trObjectsCount,
++                freeBuffer, this);
+ 
+             const pid_t origPid = mCallingPid;
+             const char* origSid = mCallingSid;
+@@ -1213,6 +1501,18 @@ void IPCThreadState::freeBuffer(Parcel* parcel, const uint8_t* data,
+     ALOG_ASSERT(data != NULL, "Called with NULL data");
+     if (parcel != NULL) parcel->closeFileDescriptors();
+     IPCThreadState* state = self();
++    if (!state->mProcess->isKernelBuffer(data)) {
++        // A copy made by usgImport(). As the kernel does for the descriptors
++        // of BINDER_TYPE_FDA objects, close the ones this transaction brought.
++        UsgHeader* header = reinterpret_cast<UsgHeader*>(const_cast<uint8_t*>(data)) - 1;
++        for (uint64_t i = 0; i < header->fdsCount; i++) {
++            const flat_binder_object* flat = reinterpret_cast<const flat_binder_object*>(
++                    data + header->fdsOffset + i * sizeof(flat_binder_object));
++            if (flat->type == BINDER_TYPE_FD) close(flat->handle);
++        }
++        data = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(header->kernelData));
++        free(header);
++    }
+     state->mOut.writeInt32(BC_FREE_BUFFER);
+     state->mOut.writePointer((uintptr_t)data);
+ }
+diff --git a/ProcessState.cpp b/ProcessState.cpp
+index e4e1a12..02e1d6f 100644
+--- a/ProcessState.cpp
++++ b/ProcessState.cpp
+@@ -20,6 +20,7 @@
+ 
+ #include <hwbinder/BpHwBinder.h>
+ #include <hwbinder/IPCThreadState.h>
++#include <hwbinder/Parcel.h>
+ #include <hwbinder/binder_kernel.h>
+ #include <utils/Atomic.h>
+ #include <utils/Log.h>
+@@ -85,9 +86,37 @@ void ProcessState::setContextObject(const sp<IBinder>& object)
+     setContextObject(object, String16("default"));
+ }
+ 
++bool ProcessState::isKernelBuffer(const void* ptr) const
++{
++    if (mVMStart == MAP_FAILED) return false;
++    const uint8_t* start = static_cast<const uint8_t*>(mVMStart);
++    const uint8_t* p = static_cast<const uint8_t*>(ptr);
++    return p >= start && p < start + BINDER_VM_SIZE;
++}
++
+ sp<IBinder> ProcessState::getContextObject(const sp<IBinder>& /*caller*/)
+ {
+-    return getStrongProxyForHandle(0);
++    // The kernel of this device has a single binder context, and handle 0 of
++    // it is servicemanager. hwservicemanager publishes itself there as an
++    // ordinary service (see IPCThreadState::publishContextObject()), so it is
++    // looked up by name, speaking the wire format of libbinder.
++    for (int attempt = 0; attempt < 50; attempt++) {
++        Parcel data, reply;
++        data.writeInt32(0 /* strict mode policy */);
++        data.writeString16(String16("android.os.IServiceManager"));
++        data.writeString16(String16("hwservicemanager"));
++        status_t err = IPCThreadState::self()->transact(
++                0, 2 /* CHECK_SERVICE_TRANSACTION */, data, &reply, 0);
++        if (err == NO_ERROR) {
++            sp<IBinder> binder;
++            if (reply.readNullableStrongBinder(&binder) == NO_ERROR && binder != NULL) {
++                return binder;
++            }
++        }
++        usleep(100000);
++    }
++    ALOGE("hwservicemanager is not registered with servicemanager");
++    return NULL;
+ }
+ 
+ void ProcessState::setContextObject(const sp<IBinder>& object, const String16& name)
+@@ -339,7 +368,8 @@ void ProcessState::giveThreadPoolName() {
+ 
+ static int open_driver()
+ {
+-    int fd = open("/dev/hwbinder", O_RDWR | O_CLOEXEC);
++    // No /dev/hwbinder on this kernel: hwbinder shares the only binder device
++    int fd = open("/dev/binder", O_RDWR | O_CLOEXEC);
+     if (fd >= 0) {
+         int vers = 0;
+         status_t result = ioctl(fd, BINDER_VERSION, &vers);
+diff --git a/include/hwbinder/IPCThreadState.h b/include/hwbinder/IPCThreadState.h
+index a3224c3..707dbf5 100644
+--- a/include/hwbinder/IPCThreadState.h
++++ b/include/hwbinder/IPCThreadState.h
+@@ -97,11 +97,16 @@ public:
+ 
+             // Service manager registration
+             void                setTheContextObject(sp<BHwBinder> obj);
++
++            // Registers the context object with servicemanager under the name
++            // "hwservicemanager", in place of BINDER_SET_CONTEXT_MGR
++            status_t            publishContextObject();
+ private:
+                                 IPCThreadState();
+                                 ~IPCThreadState();
+ 
+             status_t            sendReply(const Parcel& reply, uint32_t flags);
++            void                freeUsgPending();
+             status_t            waitForResponse(Parcel *reply,
+                                                 status_t *acquireResult=NULL);
+             status_t            talkWithDriver(bool doReceive=true);
+@@ -137,6 +142,9 @@ private:
+             int32_t             mStrictModePolicy;
+             int32_t             mLastTransactionBinderFlags;
+             sp<BHwBinder>         mContextObject;
++            // Transaction data translated for a kernel without scatter-gather
++            // support, to be freed once the driver has consumed it
++            Vector<void*>       mUsgPending;
+ };
+ 
+ }; // namespace hardware
+diff --git a/include/hwbinder/ProcessState.h b/include/hwbinder/ProcessState.h
+index 5441b75..3b7b63a 100644
+--- a/include/hwbinder/ProcessState.h
++++ b/include/hwbinder/ProcessState.h
+@@ -71,6 +71,10 @@ public:
+ private:
+     friend class IPCThreadState;
+ 
++            // Whether the pointer lies in the transaction memory mapped from
++            // the binder driver
++            bool                isKernelBuffer(const void* ptr) const;
++
+                                 ProcessState();
+                                 ~ProcessState();
+ 

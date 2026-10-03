@@ -1,134 +1,28 @@
-# Builds LineageOS 14.1 for the Lenovo TB-7304F inside an Ubuntu 18.04 container
+# Builds LineageOS 15.1 for the Lenovo TB-7304F, in up to three stages
 name: Build LineageOS
 
 on:
   push:
-    branches: [cm-14.1]
+    branches: [lineage-15.1]
     paths-ignore: ['**.md']
   workflow_dispatch:
 
-env:
-  DEVICE: TB7304F
-  DEVICE_PATH: device/lenovo/TB7304F
-  SRC: /mnt/los
-
 jobs:
-  build:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 360
+  stage1:
+    uses: ./.github/workflows/stage.yml
+    with:
+      stage: 1
 
-    steps:
-      - name: Free up disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
-                      /usr/local/share/boost /usr/share/swift /usr/local/.ghcup /usr/local/share/powershell \
-                      /usr/local/lib/node_modules /opt/az /opt/microsoft /opt/google
-          docker image prune -af > /dev/null
-          df -h / /mnt
+  stage2:
+    needs: stage1
+    if: needs.stage1.outputs.done == 'false'
+    uses: ./.github/workflows/stage.yml
+    with:
+      stage: 2
 
-      - name: Check out the device tree
-        uses: actions/checkout@v4
-        with:
-          path: tree
-
-      - name: Restore the compiler cache
-        uses: actions/cache/restore@v4
-        with:
-          path: /home/runner/ccache
-          key: ccache-${{ github.run_id }}
-          restore-keys: ccache-
-
-      - name: Prepare the build container
-        run: |
-          sudo mkdir -p "$SRC" /home/runner/out /home/runner/ccache
-          sudo chown "$USER" "$SRC" /home/runner/out /home/runner/ccache
-          cat > "$SRC/in-container.sh" <<'SCRIPT'
-          set -e
-          export DEBIAN_FRONTEND=noninteractive LC_ALL=C USER=root
-          if ! command -v repo > /dev/null; then
-            apt-get update > /dev/null
-            apt-get install -y --no-install-recommends \
-              bc bison build-essential ca-certificates curl flex g++-multilib gcc-multilib git gnupg gperf \
-              imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev \
-              libssl-dev libxml2 libxml2-utils lzop openjdk-8-jdk-headless pngcrush python python3 rsync \
-              schedtool squashfs-tools unzip xsltproc zip zlib1g-dev > /dev/null
-            # Jack talks TLSv1 to its own server
-            sed -i 's/TLSv1, TLSv1.1, //' /etc/java-8-openjdk/security/java.security
-            curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo
-            chmod a+rx /usr/local/bin/repo
-            git config --global user.name "github-actions[bot]"
-            git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git config --global color.ui false
-            git config --global --add safe.directory '*'
-            # The Chromium WebView prebuilts are Git LFS objects, and the git-lfs
-            # of Ubuntu 18.04 is too old for them
-            curl -fsSL https://github.com/git-lfs/git-lfs/releases/download/v3.5.1/git-lfs-linux-amd64-v3.5.1.tar.gz |
-              tar -xz -C /tmp && install -m 755 /tmp/git-lfs-3.5.1/git-lfs /usr/local/bin/git-lfs
-            git lfs install > /dev/null
-          fi
-          cd /src
-          "$@"
-          SCRIPT
-          docker run -d --name build -v "$SRC:/src" -v /home/runner/out:/out -v /home/runner/ccache:/ccache \
-            -v "$GITHUB_WORKSPACE/tree:/tree:ro" \
-            ubuntu:18.04 sleep infinity
-
-      - name: Sync the LineageOS sources
-        run: |
-          docker exec build bash /src/in-container.sh bash -c '
-            repo init --depth=1 -u https://github.com/LineageOS/android.git -b cm-14.1 &&
-            repo sync -c -j8 --force-sync --no-clone-bundle --no-tags &&
-            test -f build/envsetup.sh &&
-            for d in external/chromium-webview/prebuilt/arm external/chromium-webview/prebuilt/arm64; do
-              git -C $d lfs pull $(git -C $d remote | head -n1) &&
-              unzip -tq $d/webview.apk > /dev/null || exit 1
-            done'
-          df -h / /mnt
-
-      - name: Place the device tree
-        run: |
-          docker exec build bash -c "mkdir -p /src/$(dirname "$DEVICE_PATH") && rm -rf /src/$DEVICE_PATH &&
-            cp -a /tree /src/$DEVICE_PATH && rm -rf /src/$DEVICE_PATH/.git /src/$DEVICE_PATH/.github"
-
-      - name: Build
-        run: |
-          docker exec -e DEVICE="$DEVICE" build bash /src/in-container.sh bash -c '
-            export OUT_DIR=/out
-            export USE_CCACHE=1 CCACHE_DIR=/ccache CCACHE_COMPRESS=1
-            prebuilts/misc/linux-x86/ccache/ccache -M 7G > /dev/null
-            export ANDROID_JACK_VM_ARGS="-Dfile.encoding=UTF-8 -XX:+TieredCompilation -Xmx6g"
-            source build/envsetup.sh &&
-            lunch "lineage_${DEVICE}-userdebug" &&
-            mka bacon > /out/build.log 2>&1' || { tail -n 150 /home/runner/out/build.log; df -h / /mnt; exit 1; }
-          tail -n 20 /home/runner/out/build.log
-          df -h / /mnt
-
-      - name: Collect the output
-        run: |
-          mkdir dist
-          cp -v /home/runner/out/target/product/$DEVICE/lineage-14.1-*.zip dist/
-          # The bootloader only accepts kernels and ramdisks with MediaTek headers
-          python3 tree/tools/mtk_header.py /home/runner/out/target/product/$DEVICE/boot.img dist/boot.img ROOTFS
-          (cd dist && zip -q lineage-14.1-*.zip boot.img)
-          (cd dist && sha256sum * | tee sha256sums.txt)
-
-      - name: Save the compiler cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: /home/runner/ccache
-          key: ccache-${{ github.run_id }}
-
-      - name: Upload the build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: /home/runner/out/build.log
-          if-no-files-found: ignore
-
-      - name: Upload the artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: lineage-14.1-TB7304F
-          path: dist/*
+  stage3:
+    needs: stage2
+    if: needs.stage2.outputs.done == 'false'
+    uses: ./.github/workflows/stage.yml
+    with:
+      stage: 3

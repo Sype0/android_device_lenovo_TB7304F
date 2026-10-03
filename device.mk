@@ -19,7 +19,67 @@ PRODUCT_COPY_FILES += \
 # Shims for the 7.0 blobs
 PRODUCT_PACKAGES += \
     libmtk_symbols \
+    libmtk_gui \
+    libmtk_icu \
     libmtk_ifc
+
+# HIDL
+PRODUCT_PACKAGES += \
+    android.hidl.base@1.0 \
+    android.hidl.manager@1.0
+
+# Bluetooth
+PRODUCT_PACKAGES += \
+    android.hardware.bluetooth@1.0-impl \
+    android.hardware.bluetooth@1.0-service
+
+# Camera
+PRODUCT_PACKAGES += \
+    android.hardware.camera.provider@2.4-impl \
+    camera.device@1.0-impl \
+    camera.device@3.2-impl
+
+# DRM
+PRODUCT_PACKAGES += \
+    android.hardware.drm@1.0-impl \
+    android.hardware.drm@1.0-service
+
+# Gatekeeper and keymaster
+PRODUCT_PACKAGES += \
+    android.hardware.gatekeeper@1.0-impl \
+    android.hardware.gatekeeper@1.0-service \
+    android.hardware.keymaster@3.0-impl \
+    android.hardware.keymaster@3.0-service
+
+# GPS
+PRODUCT_PACKAGES += \
+    android.hardware.gnss@1.0-impl \
+    android.hardware.gnss@1.0-service
+
+# Health
+PRODUCT_PACKAGES += \
+    android.hardware.health@1.0-impl \
+    android.hardware.health@1.0-service
+
+# Lights
+PRODUCT_PACKAGES += \
+    android.hardware.light@2.0-impl \
+    android.hardware.light@2.0-service
+
+# Memtrack
+PRODUCT_PACKAGES += \
+    android.hardware.memtrack@1.0-impl \
+    android.hardware.memtrack@1.0-service
+
+# Power
+PRODUCT_PACKAGES += \
+    android.hardware.power@1.0-impl \
+    android.hardware.power@1.0-service
+
+# Sensors
+PRODUCT_PACKAGES += \
+    android.hardware.sensors@1.0-impl \
+    android.hardware.sensors@1.0-service
 
 # GPS (mnld)
 PRODUCT_PACKAGES += \
@@ -27,11 +87,19 @@ PRODUCT_PACKAGES += \
 
 # Graphics
 PRODUCT_PACKAGES += \
+    android.hardware.graphics.allocator@2.0-impl \
+    android.hardware.graphics.allocator@2.0-service \
+    android.hardware.graphics.composer@2.1-impl \
+    android.hardware.graphics.mapper@2.0-impl \
+    android.hardware.renderscript@1.0-impl \
     libdrm \
     libion
 
 # Audio
 PRODUCT_PACKAGES += \
+    android.hardware.audio@2.0-impl \
+    android.hardware.audio@2.0-service \
+    android.hardware.audio.effect@2.0-impl \
     audio.a2dp.default \
     libalsautils \
     libaudio-resampler \
@@ -50,10 +118,17 @@ PRODUCT_COPY_FILES += \
     frameworks/av/media/libstagefright/data/media_codecs_google_audio.xml:system/etc/media_codecs_google_audio.xml \
     frameworks/av/media/libstagefright/data/media_codecs_google_video_le.xml:system/etc/media_codecs_google_video_le.xml
 
+# The codecs are reached over binder, as on 7.x
+PRODUCT_PROPERTY_OVERRIDES += \
+    persist.media.treble_omx=false
+
 # Wi-Fi
 PRODUCT_PACKAGES += \
+    android.hardware.wifi@1.0-service \
     hostapd \
     libwpa_client \
+    wificond \
+    wifilogd \
     wpa_supplicant
 
 PRODUCT_COPY_FILES += \
@@ -72,6 +147,7 @@ PRODUCT_PACKAGES += \
 
 # USB
 PRODUCT_PACKAGES += \
+    android.hardware.usb@1.0-service \
     com.android.future.usb.accessory
 
 # Permissions

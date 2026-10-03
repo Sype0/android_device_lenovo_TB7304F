@@ -1,1 +1,1 @@
-/system/vendor/bin(/.*)?    u:object_r:mtk_vendor_exec:s0
+/(system/vendor|vendor)/bin/[^/]+    u:object_r:mtk_vendor_exec:s0

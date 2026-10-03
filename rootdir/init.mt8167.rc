@@ -8,7 +8,16 @@ import init.project.rc
 # *** DO NOT import the new rc file after this line ***
 import init.modem.rc
 
+# The stock kernel has a single binder device. hwbinder is emulated on top of
+# it by libhwbinder; the processes that ask for vndbinder get binder as well,
+# which leaves nothing to do for a second service manager.
+service vndservicemanager /system/bin/true
+    disabled
+    oneshot
+
 on early-init
+    symlink /dev/binder /dev/hwbinder
+    symlink /dev/binder /dev/vndbinder
     mount debugfs debugfs /sys/kernel/debug
     chmod 0755 /sys/kernel/debug
     wait /dev/.coldboot_done 1000

@@ -1,0 +1,188 @@
+# One attempt at building LineageOS 15.1 for the Lenovo TB-7304F inside an
+# Ubuntu 18.04 container. A job may run for six hours at most, so the build is
+# cut short before that and the next stage carries on from the compiler cache.
+name: Build stage
+
+on:
+  workflow_call:
+    inputs:
+      stage:
+        type: number
+        required: true
+    outputs:
+      done:
+        description: Whether the build ran to completion
+        value: ${{ jobs.build.outputs.done }}
+
+env:
+  DEVICE: TB7304F
+  DEVICE_PATH: device/lenovo/TB7304F
+  SRC: /mnt/los
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    outputs:
+      done: ${{ steps.build.outputs.done }}
+
+    steps:
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
+                      /usr/local/share/boost /usr/share/swift /usr/local/.ghcup /usr/local/share/powershell \
+                      /usr/local/lib/node_modules /opt/az /opt/microsoft /opt/google
+          docker image prune -af > /dev/null
+          df -h / /mnt
+
+      - name: Check out the device tree
+        uses: actions/checkout@v4
+        with:
+          path: tree
+
+      - name: Restore the compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/ccache
+          key: ccache15-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stage }}
+          restore-keys: ccache15-
+
+      - name: Prepare the build container
+        run: |
+          sudo mkdir -p "$SRC" /home/runner/out /home/runner/ccache
+          sudo chown "$USER" "$SRC" /home/runner/out /home/runner/ccache
+          cat > "$SRC/in-container.sh" <<'SCRIPT'
+          set -e
+          export DEBIAN_FRONTEND=noninteractive LC_ALL=C USER=root
+          if ! command -v repo > /dev/null; then
+            apt-get update > /dev/null
+            apt-get install -y --no-install-recommends \
+              bc bison build-essential ca-certificates curl flex g++-multilib gcc-multilib git gnupg gperf \
+              imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev \
+              libssl-dev libxml2 libxml2-utils lzop openjdk-8-jdk-headless patch pngcrush python python3 rsync \
+              schedtool squashfs-tools unzip xsltproc zip zlib1g-dev > /dev/null
+            curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo
+            chmod a+rx /usr/local/bin/repo
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git config --global color.ui false
+            git config --global --add safe.directory '*'
+            # The Chromium WebView prebuilts are Git LFS objects, and the git-lfs
+            # of Ubuntu 18.04 is too old for them
+            curl -fsSL https://github.com/git-lfs/git-lfs/releases/download/v3.5.1/git-lfs-linux-amd64-v3.5.1.tar.gz |
+              tar -xz -C /tmp && install -m 755 /tmp/git-lfs-3.5.1/git-lfs /usr/local/bin/git-lfs
+            git lfs install > /dev/null
+          fi
+          cd /src
+          "$@"
+          SCRIPT
+          docker run -d --name build -v "$SRC:/src" -v /home/runner/out:/out -v /home/runner/ccache:/ccache \
+            -v "$GITHUB_WORKSPACE/tree:/tree:ro" \
+            ubuntu:18.04 sleep infinity
+
+      - name: Sync the LineageOS sources
+        run: |
+          docker exec build bash /src/in-container.sh bash -c '
+            repo init --depth=1 -u https://github.com/LineageOS/android.git -b lineage-15.1 -g default,-darwin &&
+            repo sync -c -j8 --force-sync --no-clone-bundle --no-tags &&
+            test -f build/envsetup.sh &&
+            for d in external/chromium-webview/prebuilt/arm external/chromium-webview/prebuilt/arm64; do
+              if ! unzip -tq $d/webview.apk > /dev/null 2>&1; then
+                git -C $d lfs pull $(git -C $d remote | head -n1) &&
+                unzip -tq $d/webview.apk > /dev/null || exit 1
+              fi
+            done'
+          df -h /
+
+      - name: Place the device tree
+        run: |
+          docker exec build bash -c "mkdir -p /src/$(dirname "$DEVICE_PATH") && rm -rf /src/$DEVICE_PATH &&
+            cp -a /tree /src/$DEVICE_PATH && rm -rf /src/$DEVICE_PATH/.git /src/$DEVICE_PATH/.github"
+
+      - name: Patch the sources
+        run: |
+          docker exec build bash /src/in-container.sh bash -c '
+            set -e
+            (cd /tree/patches && find . -name "*.patch" | sort) | while read -r p; do
+              echo "Applying $p"
+              patch -d "$(dirname "$p")" -p1 --no-backup-if-mismatch < "/tree/patches/$p"
+            done
+            # The stock sensors HAL implements the 1.0 device API
+            sed -i "s/CHECK_GE(getHalDeviceVersion(), SENSORS_DEVICE_API_VERSION_1_3)/CHECK_GE(getHalDeviceVersion(), SENSORS_DEVICE_API_VERSION_1_0)/" \
+              hardware/interfaces/sensors/1.0/default/Sensors.cpp
+            grep -q "CHECK_GE(getHalDeviceVersion(), SENSORS_DEVICE_API_VERSION_1_0)" hardware/interfaces/sensors/1.0/default/Sensors.cpp
+            # Stock only has a 32-bit libbt-vendor.so
+            sed -i "s/^LOCAL_MODULE := android.hardware.bluetooth@1.0-service\$/&\nLOCAL_MULTILIB := 32/" \
+              hardware/interfaces/bluetooth/1.0/default/Android.mk
+            grep -q "LOCAL_MULTILIB := 32" hardware/interfaces/bluetooth/1.0/default/Android.mk
+            # The history is not needed to build, the space is
+            rm -rf .repo/project-objects .repo/projects'
+          df -h /
+
+      - name: Build
+        id: build
+        run: |
+          status=0
+          docker exec -e DEVICE="$DEVICE" build bash /src/in-container.sh bash -c '
+            export OUT_DIR=/out
+            export USE_CCACHE=1 CCACHE_DIR=/ccache CCACHE_COMPRESS=1
+            prebuilts/misc/linux-x86/ccache/ccache -M 8G > /dev/null
+            source build/envsetup.sh &&
+            lunch "lineage_${DEVICE}-userdebug" &&
+            # What this tree adds or changes comes first, to fail early
+            timeout 60m make -j$(nproc) libhwbinder hwservicemanager libmtk_symbols libmtk_gui libmtk_icu libmtk_ifc \
+              android.hardware.wifi@1.0-service wpa_supplicant selinux_policy > /out/build.log 2>&1 &&
+            timeout 255m make -j$(nproc) bacon >> /out/build.log 2>&1' || status=$?
+          tail -n 20 /home/runner/out/build.log
+          df -h /
+          if [ $status -eq 124 ]; then
+            echo "Out of time, the next stage continues"
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          elif [ $status -ne 0 ]; then
+            grep -n -B 30 -A 5 -m 5 "^FAILED:\|error:" /home/runner/out/build.log | tail -n 250
+            exit 1
+          else
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Collect the output
+        if: steps.build.outputs.done == 'true'
+        run: |
+          mkdir dist
+          cp -v /home/runner/out/target/product/$DEVICE/lineage-15.1-*.zip dist/
+          # The bootloader only accepts kernels and ramdisks with MediaTek headers
+          python3 tree/tools/mtk_header.py /home/runner/out/target/product/$DEVICE/boot.img dist/boot.img ROOTFS
+          (cd dist && zip -q lineage-15.1-*.zip boot.img)
+          (cd dist && sha256sum * | tee sha256sums.txt)
+          # For checking the stock blobs against the libraries of this build
+          tar -C /home/runner/out/target/product/$DEVICE/system -cf - lib lib64 | zstd -T0 -6 > system-libs.tar.zst
+
+      - name: Save the compiler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/ccache
+          key: ccache15-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stage }}
+
+      - name: Upload the build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ inputs.stage }}
+          path: /home/runner/out/build.log
+          if-no-files-found: ignore
+          overwrite: true
+
+      - name: Upload the artifacts
+        if: steps.build.outputs.done == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lineage-15.1-TB7304F
+          path: dist/*
+
+      - name: Upload the system libraries
+        if: steps.build.outputs.done == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-libs
+          path: system-libs.tar.zst

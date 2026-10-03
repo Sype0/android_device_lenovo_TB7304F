@@ -63,7 +63,14 @@ BOARD_HAVE_BLUETOOTH := true
 BOARD_BLUETOOTH_DOES_NOT_USE_RFKILL := true
 BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR := $(DEVICE_PATH)/bluetooth
 
+# Camera
+TARGET_HAS_LEGACY_CAMERA_HAL1 := true
+
 # Wi-Fi
+BOARD_WLAN_DEVICE := MediaTek
+WIFI_DRIVER_STATE_CTRL_PARAM := "/dev/wmtWifi"
+WIFI_DRIVER_STATE_ON := 1
+WIFI_DRIVER_STATE_OFF := 0
 WPA_SUPPLICANT_VERSION := VER_0_8_X
 BOARD_WPA_SUPPLICANT_DRIVER := NL80211
 BOARD_WPA_SUPPLICANT_PRIVATE_LIB := lib_driver_cmd_mt66xx
@@ -74,10 +81,31 @@ WIFI_DRIVER_FW_PATH_STA := STA
 WIFI_DRIVER_FW_PATH_AP := AP
 WIFI_DRIVER_FW_PATH_P2P := P2P
 
-# The stock blobs were built against Android 7.0, libmtk_symbols carries the
-# symbols that changed in 7.1
-LINKER_FORCED_SHIM_LIBS := \
-    /system/vendor/lib/libui_ext.so|libmtk_symbols.so:/system/vendor/lib64/libui_ext.so|libmtk_symbols.so:/system/vendor/lib/libcam.client.so|libmtk_symbols.so:/system/vendor/lib64/libcam.client.so|libmtk_symbols.so:/system/vendor/lib/libcam_utils.so|libmtk_symbols.so:/system/vendor/lib64/libcam_utils.so|libmtk_symbols.so:/system/vendor/lib/libmtk_mmutils.so|libmtk_symbols.so:/system/vendor/lib64/libmtk_mmutils.so|libmtk_symbols.so:/system/vendor/lib/libMtkOmxVenc.so|libmtk_symbols.so:/system/vendor/bin/thermal|libmtk_ifc.so
+# The stock blobs were built against Android 7.0, the shims carry the symbols
+# that changed since
+TARGET_LD_SHIM_LIBS := \
+    /system/vendor/lib/libui_ext.so|libmtk_symbols.so \
+    /system/vendor/lib64/libui_ext.so|libmtk_symbols.so \
+    /system/vendor/lib/libcam.client.so|libmtk_symbols.so \
+    /system/vendor/lib64/libcam.client.so|libmtk_symbols.so \
+    /system/vendor/lib/libcam_utils.so|libmtk_symbols.so \
+    /system/vendor/lib64/libcam_utils.so|libmtk_symbols.so \
+    /system/vendor/lib/libmtk_mmutils.so|libmtk_symbols.so \
+    /system/vendor/lib64/libmtk_mmutils.so|libmtk_symbols.so \
+    /system/vendor/lib/libMtkOmxVenc.so|libmtk_symbols.so \
+    /system/vendor/lib/libgui_ext.so|libmtk_gui.so \
+    /system/vendor/lib/libaal.so|libmtk_gui.so \
+    /system/vendor/lib/libcam.utils.sensorlistener.so|libsensor.so \
+    /system/vendor/lib/libdrmmtkutil.so|libmtk_icu.so \
+    /system/vendor/lib64/libgui_ext.so|libmtk_gui.so \
+    /system/vendor/lib64/libaal.so|libmtk_gui.so \
+    /system/vendor/lib64/libcam.utils.sensorlistener.so|libsensor.so \
+    /system/vendor/lib64/libdrmmtkutil.so|libmtk_icu.so \
+    /system/vendor/bin/thermalindicator|libmtk_gui.so \
+    /system/vendor/bin/thermal|libmtk_ifc.so
+
+# HIDL
+DEVICE_MANIFEST_FILE := $(DEVICE_PATH)/manifest.xml
 
 # SELinux
 BOARD_SEPOLICY_DIRS += $(DEVICE_PATH)/sepolicy

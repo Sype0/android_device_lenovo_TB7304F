@@ -1,4 +1,4 @@
-# LineageOS 14.1 device tree for Lenovo Tab 7 Essential (TB-7304F)
+# LineageOS 15.1 device tree for Lenovo Tab 7 Essential (TB-7304F)
 
 Work in progress, not booting yet.
 
