@@ -1101,7 +1101,7 @@ start nvram_country
 service enableswap /system/bin/sh /enableswap.sh
     class core
     oneshot
-    seclabel u:r:enableswap:s0
+    seclabel u:r:mtk_vendor:s0
 
 # open /dev/watchdog
 service watchdogd /sbin/watchdogd  20 10
