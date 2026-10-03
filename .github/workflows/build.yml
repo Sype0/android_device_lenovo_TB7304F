@@ -31,17 +31,24 @@ jobs:
         with:
           path: tree
 
+      - name: Restore the compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/ccache
+          key: ccache-${{ github.run_id }}
+          restore-keys: ccache-
+
       - name: Prepare the build container
         run: |
-          sudo mkdir -p "$SRC" /home/runner/out
-          sudo chown "$USER" "$SRC" /home/runner/out
+          sudo mkdir -p "$SRC" /home/runner/out /home/runner/ccache
+          sudo chown "$USER" "$SRC" /home/runner/out /home/runner/ccache
           cat > "$SRC/in-container.sh" <<'SCRIPT'
           set -e
           export DEBIAN_FRONTEND=noninteractive LC_ALL=C USER=root
           if ! command -v repo > /dev/null; then
             apt-get update > /dev/null
             apt-get install -y --no-install-recommends \
-              bc bison build-essential ca-certificates curl flex g++-multilib gcc-multilib git gnupg gperf \
+              bc bison build-essential ca-certificates curl flex g++-multilib gcc-multilib git git-lfs gnupg gperf \
               imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev \
               libssl-dev libxml2 libxml2-utils lzop openjdk-8-jdk-headless pngcrush python python3 rsync \
               schedtool squashfs-tools unzip xsltproc zip zlib1g-dev > /dev/null
@@ -53,11 +60,14 @@ jobs:
             git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git config --global color.ui false
             git config --global --add safe.directory '*'
+            # The Chromium WebView prebuilts are Git LFS objects
+            git lfs install > /dev/null
           fi
           cd /src
           "$@"
           SCRIPT
-          docker run -d --name build -v "$SRC:/src" -v /home/runner/out:/out -v "$GITHUB_WORKSPACE/tree:/tree:ro" \
+          docker run -d --name build -v "$SRC:/src" -v /home/runner/out:/out -v /home/runner/ccache:/ccache \
+            -v "$GITHUB_WORKSPACE/tree:/tree:ro" \
             ubuntu:18.04 sleep infinity
 
       - name: Sync the LineageOS sources
@@ -77,6 +87,8 @@ jobs:
         run: |
           docker exec -e DEVICE="$DEVICE" build bash /src/in-container.sh bash -c '
             export OUT_DIR=/out
+            export USE_CCACHE=1 CCACHE_DIR=/ccache CCACHE_COMPRESS=1
+            prebuilts/misc/linux-x86/ccache/ccache -M 7G > /dev/null
             export ANDROID_JACK_VM_ARGS="-Dfile.encoding=UTF-8 -XX:+TieredCompilation -Xmx6g"
             source build/envsetup.sh &&
             lunch "lineage_${DEVICE}-userdebug" &&
@@ -88,8 +100,17 @@ jobs:
         run: |
           mkdir dist
           cp -v /home/runner/out/target/product/$DEVICE/lineage-14.1-*.zip dist/
-          cp -v /home/runner/out/target/product/$DEVICE/boot.img dist/
+          # The bootloader only accepts kernels and ramdisks with MediaTek headers
+          python3 tree/tools/mtk_header.py /home/runner/out/target/product/$DEVICE/boot.img dist/boot.img ROOTFS
+          (cd dist && zip -q lineage-14.1-*.zip boot.img)
           (cd dist && sha256sum * | tee sha256sums.txt)
+
+      - name: Save the compiler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/ccache
+          key: ccache-${{ github.run_id }}
 
       - name: Upload the build log
         if: always()

@@ -13,12 +13,16 @@ TARGET_2ND_CPU_ABI := armeabi-v7a
 TARGET_2ND_CPU_ABI2 := armeabi
 TARGET_2ND_CPU_VARIANT := cortex-a53
 
+TARGET_USES_64_BIT_BINDER := true
+
 # Bootloader
 TARGET_NO_BOOTLOADER := true
 TARGET_BOOTLOADER_BOARD_NAME := mt8167
 
 # Platform
 TARGET_BOARD_PLATFORM := mt8167
+BOARD_HAS_MTK_HARDWARE := true
+BOARD_USES_MTK_HARDWARE := true
 
 # Kernel (stock 4.4.22, TB-7304F_S100017_200102_ROW): there is no kernel
 # source for this board
@@ -33,16 +37,61 @@ BOARD_KERNEL_TAGS_OFFSET := 0x0df88000
 BOARD_MKBOOTIMG_ARGS += --ramdisk_offset $(BOARD_RAMDISK_OFFSET)
 BOARD_MKBOOTIMG_ARGS += --tags_offset $(BOARD_KERNEL_TAGS_OFFSET)
 
-# Partitions
-# TODO: system/cache/userdata sizes are placeholders, read them from the device
+# Partitions (from the stock scatter file)
 BOARD_FLASH_BLOCK_SIZE := 131072
 BOARD_BOOTIMAGE_PARTITION_SIZE := 16777216
-BOARD_RECOVERYIMAGE_PARTITION_SIZE := 16777216
-BOARD_SYSTEMIMAGE_PARTITION_SIZE := 1610612736
-BOARD_CACHEIMAGE_PARTITION_SIZE := 268435456
-BOARD_USERDATAIMAGE_PARTITION_SIZE := 4294967296
+# The LineageOS recovery does not fit the 16 MiB partition next to the 7.5 MiB
+# kernel; it is never flashed (TWRP is used), so only let the build pass.
+BOARD_RECOVERYIMAGE_PARTITION_SIZE := 33554432
+BOARD_SYSTEMIMAGE_PARTITION_SIZE := 3548381184
+BOARD_CACHEIMAGE_PARTITION_SIZE := 452984832
+BOARD_USERDATAIMAGE_PARTITION_SIZE := 3323625472
 BOARD_CACHEIMAGE_FILE_SYSTEM_TYPE := ext4
 TARGET_USERIMAGES_USE_EXT4 := true
 
+# Display
+USE_OPENGL_RENDERER := true
+NUM_FRAMEBUFFER_SURFACE_BUFFERS := 3
+TARGET_RUNNING_WITHOUT_SYNC_FRAMEWORK := true
+TARGET_FORCE_HWC_FOR_VIRTUAL_DISPLAYS := true
+
+# Audio
+USE_XML_AUDIO_POLICY_CONF := 1
+
+# Bluetooth
+BOARD_HAVE_BLUETOOTH := true
+BOARD_BLUETOOTH_DOES_NOT_USE_RFKILL := true
+BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR := $(DEVICE_PATH)/bluetooth
+
+# Wi-Fi
+WPA_SUPPLICANT_VERSION := VER_0_8_X
+BOARD_WPA_SUPPLICANT_DRIVER := NL80211
+BOARD_WPA_SUPPLICANT_PRIVATE_LIB := lib_driver_cmd_mt66xx
+BOARD_HOSTAPD_DRIVER := NL80211
+BOARD_HOSTAPD_PRIVATE_LIB := lib_driver_cmd_mt66xx
+WIFI_DRIVER_FW_PATH_PARAM := "/dev/wmtWifi"
+WIFI_DRIVER_FW_PATH_STA := STA
+WIFI_DRIVER_FW_PATH_AP := AP
+WIFI_DRIVER_FW_PATH_P2P := P2P
+
+# The stock blobs were built against Android 7.0, libmtk_symbols carries the
+# symbols that changed in 7.1
+LINKER_FORCED_SHIM_LIBS := \
+    /system/vendor/lib/libui_ext.so|libmtk_symbols.so:/system/vendor/lib64/libui_ext.so|libmtk_symbols.so:/system/vendor/lib/libcam.client.so|libmtk_symbols.so:/system/vendor/lib64/libcam.client.so|libmtk_symbols.so:/system/vendor/lib/libcam_utils.so|libmtk_symbols.so:/system/vendor/lib64/libcam_utils.so|libmtk_symbols.so:/system/vendor/lib/libmtk_mmutils.so|libmtk_symbols.so:/system/vendor/lib64/libmtk_mmutils.so|libmtk_symbols.so:/system/vendor/lib/libMtkOmxVenc.so|libmtk_symbols.so
+
+# SELinux
+BOARD_SEPOLICY_DIRS += $(DEVICE_PATH)/sepolicy
+
+# Properties
+TARGET_SYSTEM_PROP += $(DEVICE_PATH)/system.prop
+
 # Recovery
 TARGET_RECOVERY_FSTAB := $(DEVICE_PATH)/rootdir/fstab.mt8167
+
+# No kernel source: modules that depend on the kernel headers only need the
+# directory to exist
+ifeq ($(TARGET_DEVICE),TB7304F)
+$(shell mkdir -p $(OUT_DIR)/target/product/TB7304F/obj/KERNEL_OBJ/usr)
+endif
+
+TARGET_OTA_ASSERT_DEVICE := TB7304F,TB-7304F

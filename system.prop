@@ -1,0 +1,75 @@
+# Display
+ro.sf.lcd_density=160
+ro.sf.hwrotation=0
+ro.opengles.version=196610
+qemu.hw.mainkeys=0
+debug.hwui.render_dirty_regions=false
+
+# Wi-Fi only tablet
+ro.radio.noril=yes
+ro.carrier=wifi-only
+
+# Wi-Fi
+wifi.interface=wlan0
+wifi.direct.interface=p2p0
+wifi.tethering.interface=ap0
+mediatek.wlan.chip=CONSYS_MT8167
+mediatek.wlan.module.postfix=_consys_mt8167
+mediatek.wlan.ctia=0
+ro.mediatek.wlan.wsc=1
+ro.mediatek.wlan.p2p=1
+persist.mtk.wcn.combo.chipid=-1
+persist.mtk.wcn.patch.version=-1
+persist.mtk.wcn.dynamic.dump=0
+persist.mtk.connsys.poweron.ctl=0
+service.wcn.driver.ready=no
+service.wcn.coredump.mode=0
+
+# MediaTek platform, as in the stock build.prop
+ro.mediatek.platform=MT8167
+ro.mediatek.chip_ver=S01
+ro.mediatek.version.branch=alps-mp-n0.mp13
+ro.mediatek.version.release=TB-7304F_S000060_171019_ROW
+ro.mediatek.version.sdk=4
+ro.mediatek.project.path=device/huaqin/hq8167_tb_n
+ro.mtk_is_tablet=1
+ro.mtk_emmc_support=1
+ro.mtk_shared_sdcard=1
+ro.mtk_bt_support=1
+ro.mtk_wlan_support=1
+ro.mtk_gps_support=1
+ro.mtk_wifi_mcc_support=1
+ro.mtk_dhcpv6c_wifi=1
+ro.mtk_aal_support=1
+ro.mtk_pq_support=2
+ro.mtk_pq_color_mode=1
+ro.mtk_perfservice_support=1
+ro.mtk_audenh_support=1
+ro.mtk_besloudness_support=1
+ro.mtk_audio_tuning_tool_ver=V2.2
+ro.mtk_audio_alac_support=1
+ro.mtk_audio_ape_support=1
+ro.mtk_support_mp2_playback=1
+ro.mtk_wmv_playback_support=1
+ro.have_aacencode_feature=1
+ro.mtk_deinterlace_support=1
+ro.mtk_sec_video_path_support=1
+ro.mtk_widevine_drm_l3_support=1
+ro.mtk_key_manager_support=1
+ro.mtk_key_manager_kb_path=4
+ro.mtk_cam_mfb_support=0
+ro.mtk_cam_cfb=1
+ro.mtk_dual_mic_support=0
+mtk_in_house_tee_support=true
+mtk.vdec.waitkeyframeforplay=1
+ro.kernel.zio=38,108,105,16
+sys.ipo.disable=1
+drm.service.enabled=true
+
+# Camera
+camera.disable_zsl_mode=1
+ro.camera.sound.forced=0
+
+# USB
+ro.sys.usb.storage.type=mtp
+ro.sys.usb.charging.only=yes

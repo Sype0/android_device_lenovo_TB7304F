@@ -1,0 +1,10 @@
+# Bring-up aid: keep the logs of every boot on /cache, where they can be
+# collected from the recovery when the system does not come up.
+on post-fs
+    mkdir /cache/bootlog 0755 root root
+
+service bootlog /system/bin/logcat -b all -v threadtime -f /cache/bootlog/logcat.txt -r 8192 -n 6
+    class main
+    user root
+    group root system log
+    seclabel u:r:mtk_vendor:s0
