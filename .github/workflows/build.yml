@@ -48,7 +48,7 @@ jobs:
           if ! command -v repo > /dev/null; then
             apt-get update > /dev/null
             apt-get install -y --no-install-recommends \
-              bc bison build-essential ca-certificates curl flex g++-multilib gcc-multilib git git-lfs gnupg gperf \
+              bc bison build-essential ca-certificates curl flex g++-multilib gcc-multilib git gnupg gperf \
               imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev \
               libssl-dev libxml2 libxml2-utils lzop openjdk-8-jdk-headless pngcrush python python3 rsync \
               schedtool squashfs-tools unzip xsltproc zip zlib1g-dev > /dev/null
@@ -60,7 +60,10 @@ jobs:
             git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git config --global color.ui false
             git config --global --add safe.directory '*'
-            # The Chromium WebView prebuilts are Git LFS objects
+            # The Chromium WebView prebuilts are Git LFS objects, and the git-lfs
+            # of Ubuntu 18.04 is too old for them
+            curl -fsSL https://github.com/git-lfs/git-lfs/releases/download/v3.5.1/git-lfs-linux-amd64-v3.5.1.tar.gz |
+              tar -xz -C /tmp && install -m 755 /tmp/git-lfs-3.5.1/git-lfs /usr/local/bin/git-lfs
             git lfs install > /dev/null
           fi
           cd /src
@@ -75,7 +78,11 @@ jobs:
           docker exec build bash /src/in-container.sh bash -c '
             repo init --depth=1 -u https://github.com/LineageOS/android.git -b cm-14.1 &&
             repo sync -c -j8 --force-sync --no-clone-bundle --no-tags &&
-            test -f build/envsetup.sh'
+            test -f build/envsetup.sh &&
+            for d in external/chromium-webview/prebuilt/arm external/chromium-webview/prebuilt/arm64; do
+              git -C $d lfs pull $(git -C $d remote | head -n1) &&
+              unzip -tq $d/webview.apk > /dev/null || exit 1
+            done'
           df -h / /mnt
 
       - name: Place the device tree
