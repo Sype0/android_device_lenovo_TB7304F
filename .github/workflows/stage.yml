@@ -124,6 +124,11 @@ jobs:
             sed -i "s/if (mHidlFactory != 0 \&\& strcmp(AUDIO_HARDWARE_MODULE_ID_A2DP, name) != 0/if (false \&\& mHidlFactory != 0 \&\& strcmp(AUDIO_HARDWARE_MODULE_ID_A2DP, name) != 0/" \
               frameworks/av/media/libaudiohal/2.0/DevicesFactoryHalHybrid.cpp
             grep -q "if (false && mHidlFactory" frameworks/av/media/libaudiohal/2.0/DevicesFactoryHalHybrid.cpp
+            # No kernel source: the generated kernel headers are an empty
+            # directory, the modules that ask for them use the ones of bionic
+            sed -i "s|^    cmd: \"make \$(KERNEL_MAKE_FLAGS).*headers_install\",|    cmd: \"mkdir -p \$(genDir)/usr/include \$(genDir)/usr/techpack/audio/include\",|" \
+              vendor/lineage/build/soong/Android.bp
+            grep -q "cmd: \"mkdir -p" vendor/lineage/build/soong/Android.bp
             # System calls of the stock codecs that the sandbox of the codec
             # service does not expect
             for call in eventfd2 fchmodat fchownat flock fsync getsockopt mlock munlock pselect6 \
