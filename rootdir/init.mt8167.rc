@@ -1376,7 +1376,7 @@ service shutdown /system/bin/shutdown
 service NvRAMAgent /vendor/bin/nvram_agent_binder
     class main
     user system
-    group system net_bt_stack
+    group system bluetooth
 
 service thermal_manager /vendor/bin/thermal_manager
     class main
