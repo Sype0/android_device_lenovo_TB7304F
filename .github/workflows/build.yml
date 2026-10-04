@@ -1,9 +1,9 @@
-# Builds LineageOS 15.1 for the Lenovo TB-7304F, in up to three stages
+# Builds LineageOS 16.0 for the Lenovo TB-7304F, in up to three stages
 name: Build LineageOS
 
 on:
   push:
-    branches: [lineage-15.1]
+    branches: [lineage-16.0]
     paths-ignore: ['**.md']
   workflow_dispatch:
 

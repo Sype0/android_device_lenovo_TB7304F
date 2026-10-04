@@ -56,9 +56,8 @@ NUM_FRAMEBUFFER_SURFACE_BUFFERS := 3
 TARGET_RUNNING_WITHOUT_SYNC_FRAMEWORK := true
 TARGET_FORCE_HWC_FOR_VIRTUAL_DISPLAYS := true
 
-# Audio: the stock HAL is loaded into audioserver, as it was on 7.x
+# Audio
 USE_XML_AUDIO_POLICY_CONF := 1
-USE_LEGACY_LOCAL_AUDIO_HAL := true
 
 # Bluetooth
 BOARD_HAVE_BLUETOOTH := true

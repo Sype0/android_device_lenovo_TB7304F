@@ -1,4 +1,4 @@
-# One attempt at building LineageOS 15.1 for the Lenovo TB-7304F inside an
+# One attempt at building LineageOS 16.0 for the Lenovo TB-7304F inside an
 # Ubuntu 18.04 container. A job may run for six hours at most, so the build is
 # cut short before that and the next stage carries on from the compiler cache.
 name: Build stage
@@ -44,8 +44,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: /home/runner/ccache
-          key: ccache15-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stage }}
-          restore-keys: ccache15-
+          key: ccache16-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stage }}
+          restore-keys: ccache16-
 
       - name: Prepare the build container
         run: |
@@ -85,7 +85,7 @@ jobs:
       - name: Sync the LineageOS sources
         run: |
           docker exec build bash /src/in-container.sh bash -c '
-            repo init --depth=1 -u https://github.com/LineageOS/android.git -b lineage-15.1 -g default,-darwin &&
+            repo init --depth=1 -u https://github.com/LineageOS/android.git -b lineage-16.0 -g default,-darwin &&
             for attempt in 1 2 3 4 5 6; do
               repo sync -c -j6 --force-sync --no-clone-bundle --no-tags && break
               echo "Sync attempt $attempt failed" && sleep 60
@@ -117,9 +117,13 @@ jobs:
               hardware/interfaces/sensors/1.0/default/Sensors.cpp
             grep -q "CHECK_GE(getHalDeviceVersion(), SENSORS_DEVICE_API_VERSION_1_0)" hardware/interfaces/sensors/1.0/default/Sensors.cpp
             # Stock only has a 32-bit libbt-vendor.so
-            sed -i "s/^LOCAL_MODULE := android.hardware.bluetooth@1.0-service\$/&\nLOCAL_MULTILIB := 32/" \
-              hardware/interfaces/bluetooth/1.0/default/Android.mk
-            grep -q "LOCAL_MULTILIB := 32" hardware/interfaces/bluetooth/1.0/default/Android.mk
+            sed -i "/name: \"android.hardware.bluetooth@1.0-service\",/a\    compile_multilib: \"32\"," \
+              hardware/interfaces/bluetooth/1.0/default/Android.bp
+            grep -q "compile_multilib: \"32\"" hardware/interfaces/bluetooth/1.0/default/Android.bp
+            # The stock audio HAL is loaded into audioserver, as it was on 7.x
+            sed -i "s/if (mHidlFactory != 0 \&\& strcmp(AUDIO_HARDWARE_MODULE_ID_A2DP, name) != 0/if (false \&\& mHidlFactory != 0 \&\& strcmp(AUDIO_HARDWARE_MODULE_ID_A2DP, name) != 0/" \
+              frameworks/av/media/libaudiohal/2.0/DevicesFactoryHalHybrid.cpp
+            grep -q "if (false && mHidlFactory" frameworks/av/media/libaudiohal/2.0/DevicesFactoryHalHybrid.cpp
             # System calls of the stock codecs that the sandbox of the codec
             # service does not expect
             for call in eventfd2 fchmodat fchownat flock fsync getsockopt mlock munlock pselect6 \
@@ -139,14 +143,14 @@ jobs:
           docker exec -e DEVICE="$DEVICE" build bash /src/in-container.sh bash -c '
             export OUT_DIR=/out
             export USE_CCACHE=1 CCACHE_DIR=/ccache CCACHE_COMPRESS=1
-            prebuilts/misc/linux-x86/ccache/ccache -M 8G > /dev/null
+            prebuilts/misc/linux-x86/ccache/ccache -M 9G > /dev/null
             export ANDROID_JACK_VM_ARGS="-Dfile.encoding=UTF-8 -XX:+TieredCompilation -Xmx6g"
             source build/envsetup.sh &&
             lunch "lineage_${DEVICE}-userdebug" &&
             # What this tree adds or changes comes first, to fail early
-            timeout 60m make -j$(nproc) libui libhwbinder hwservicemanager libmtk_symbols libmtk_gui libmtk_icu libmtk_ifc \
-              android.hardware.wifi@1.0-service wpa_supplicant selinux_policy > /out/build.log 2>&1 &&
-            timeout 255m make -j$(nproc) bacon >> /out/build.log 2>&1' || status=$?
+            timeout 90m make -j$(nproc) libui libhwbinder hwservicemanager libmtk_symbols libmtk_gui libmtk_icu libmtk_ifc \
+              libaudiohal android.hardware.bluetooth@1.0-service android.hardware.wifi@1.0-service wpa_supplicant selinux_policy > /out/build.log 2>&1 &&
+            timeout 235m make -j$(nproc) bacon >> /out/build.log 2>&1' || status=$?
           tail -n 20 /home/runner/out/build.log
           df -h /
           if [ $status -eq 124 ]; then
@@ -163,10 +167,10 @@ jobs:
         if: steps.build.outputs.done == 'true'
         run: |
           mkdir dist
-          cp -v /home/runner/out/target/product/$DEVICE/lineage-15.1-*.zip dist/
+          cp -v /home/runner/out/target/product/$DEVICE/lineage-16.0-*.zip dist/
           # The bootloader only accepts kernels and ramdisks with MediaTek headers
           python3 tree/tools/mtk_header.py /home/runner/out/target/product/$DEVICE/boot.img dist/boot.img ROOTFS
-          (cd dist && zip -q lineage-15.1-*.zip boot.img)
+          (cd dist && zip -q lineage-16.0-*.zip boot.img)
           (cd dist && sha256sum * | tee sha256sums.txt)
           # For checking the stock blobs against the libraries of this build
           tar -C /home/runner/out/target/product/$DEVICE/system -cf - lib lib64 | zstd -T0 -6 > system-libs.tar.zst
@@ -176,7 +180,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: /home/runner/ccache
-          key: ccache15-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stage }}
+          key: ccache16-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stage }}
 
       - name: Upload the build log
         if: always()
@@ -191,7 +195,7 @@ jobs:
         if: steps.build.outputs.done == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: lineage-15.1-TB7304F
+          name: lineage-16.0-TB7304F
           path: dist/*
 
       - name: Upload the system libraries

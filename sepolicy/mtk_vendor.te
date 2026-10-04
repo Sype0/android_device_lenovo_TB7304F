@@ -1,7 +1,7 @@
 # One permissive domain for all the stock MediaTek daemons: init refuses to
 # start a service that has no domain of its own.
 type mtk_vendor, domain;
-type mtk_vendor_exec, exec_type, file_type;
+type mtk_vendor_exec, exec_type, vendor_file_type, file_type;
 
 init_daemon_domain(mtk_vendor)
 permissive mtk_vendor;

@@ -1,4 +1,4 @@
-# LineageOS 15.1 device tree for Lenovo Tab 7 Essential (TB-7304F)
+# LineageOS 16.0 device tree for Lenovo Tab 7 Essential (TB-7304F)
 
 Work in progress, not tested on the device yet. The `cm-14.1` branch boots
 and works.
@@ -14,8 +14,7 @@ Android 7.0 blobs (`TB-7304F_S000060_171019_ROW`) in `proprietary/`.
   `/dev/hwbinder` and `/dev/vndbinder` are links to `/dev/binder`.
 - The libraries in `shims/` are injected into the blobs that still call
   symbols that changed since Android 7.0.
-- The audio HAL is loaded into audioserver and the codecs are reached over
-  binder, as on 7.x.
+- The audio HAL is loaded into audioserver, as on 7.x.
 - All stock daemons run in a single permissive SELinux domain and the kernel
   command line sets SELinux to permissive.
 - The logs of every boot are kept in `/cache/bootlog`.

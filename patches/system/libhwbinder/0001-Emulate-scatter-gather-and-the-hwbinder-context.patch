@@ -1,5 +1,5 @@
 diff --git a/IPCThreadState.cpp b/IPCThreadState.cpp
-index b9ca20a..479975b 100644
+index b36838e..77646d6 100644
 --- a/IPCThreadState.cpp
 +++ b/IPCThreadState.cpp
 @@ -36,6 +36,8 @@
@@ -137,7 +137,7 @@ index b9ca20a..479975b 100644
 +            flat_binder_object* flat = reinterpret_cast<flat_binder_object*>(blob + offset);
 +            int value;
 +            memcpy(&value, fds + j * sizeof(int), sizeof(int));
-+            flat->type = BINDER_TYPE_FD;
++            flat->hdr.type = BINDER_TYPE_FD;
 +            flat->flags = 0x7f | FLAT_BINDER_FLAG_ACCEPTS_FDS;
 +            flat->handle = value;
 +            kernelObjects[k++] = offset;
@@ -221,7 +221,7 @@ index b9ca20a..479975b 100644
 +                break;
 +            }
 +            obj->buffer = reinterpret_cast<uintptr_t>(copy + obj->buffer);
-+            if ((obj->flags & BINDER_BUFFER_HAS_PARENT) == 0) continue;
++            if ((obj->flags & BINDER_BUFFER_FLAG_HAS_PARENT) == 0) continue;
 +        }
 +
 +        const binder_size_t parentIndex = isBuffer ? obj->parent : fda->parent;
@@ -295,7 +295,7 @@ index b9ca20a..479975b 100644
  IPCThreadState* IPCThreadState::self()
  {
      if (gHaveTLS) {
-@@ -709,6 +988,7 @@ IPCThreadState::IPCThreadState()
+@@ -769,6 +1048,7 @@ IPCThreadState::IPCThreadState()
  
  IPCThreadState::~IPCThreadState()
  {
@@ -303,7 +303,7 @@ index b9ca20a..479975b 100644
  }
  
  status_t IPCThreadState::sendReply(const Parcel& reply, uint32_t flags)
-@@ -768,28 +1048,30 @@ status_t IPCThreadState::waitForResponse(Parcel *reply, status_t *acquireResult)
+@@ -828,28 +1108,30 @@ status_t IPCThreadState::waitForResponse(Parcel *reply, status_t *acquireResult)
                  ALOG_ASSERT(err == NO_ERROR, "Not enough command data for brREPLY");
                  if (err != NO_ERROR) goto finish;
  
@@ -348,30 +348,27 @@ index b9ca20a..479975b 100644
                      continue;
                  }
              }
-@@ -889,8 +1171,10 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
-         if (bwr.write_consumed > 0) {
-             if (bwr.write_consumed < mOut.dataSize())
+@@ -951,6 +1233,7 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
                  mOut.remove(0, bwr.write_consumed);
--            else
-+            else {
+             else {
                  mOut.setDataSize(0);
 +                freeUsgPending();
-+            }
+                 processPostWriteDerefs();
+             }
          }
-         if (bwr.read_consumed > 0) {
-             mIn.setDataSize(bwr.read_consumed);
-@@ -914,36 +1198,37 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
+@@ -976,37 +1259,37 @@ status_t IPCThreadState::talkWithDriver(bool doReceive)
  status_t IPCThreadState::writeTransactionData(int32_t cmd, uint32_t binderFlags,
      int32_t handle, uint32_t code, const Parcel& data, status_t* statusBuffer)
  {
 -    binder_transaction_data_sg tr_sg;
--    tr_sg.tr.target.ptr = 0; /* Don't pass uninitialized stack data to a remote process */
--    tr_sg.tr.target.handle = handle;
--    tr_sg.tr.code = code;
--    tr_sg.tr.flags = binderFlags;
--    tr_sg.tr.cookie = 0;
--    tr_sg.tr.sender_pid = 0;
--    tr_sg.tr.sender_euid = 0;
+-    /* Don't pass uninitialized stack data to a remote process */
+-    tr_sg.transaction_data.target.ptr = 0;
+-    tr_sg.transaction_data.target.handle = handle;
+-    tr_sg.transaction_data.code = code;
+-    tr_sg.transaction_data.flags = binderFlags;
+-    tr_sg.transaction_data.cookie = 0;
+-    tr_sg.transaction_data.sender_pid = 0;
+-    tr_sg.transaction_data.sender_euid = 0;
 +    binder_transaction_data tr;
 +    tr.target.ptr = 0; /* Don't pass uninitialized stack data to a remote process */
 +    tr.target.handle = handle;
@@ -383,10 +380,10 @@ index b9ca20a..479975b 100644
  
      const status_t err = data.errorCheck();
      if (err == NO_ERROR) {
--        tr_sg.tr.data_size = data.ipcDataSize();
--        tr_sg.tr.data.ptr.buffer = data.ipcData();
--        tr_sg.tr.offsets_size = data.ipcObjectsCount()*sizeof(binder_size_t);
--        tr_sg.tr.data.ptr.offsets = data.ipcObjects();
+-        tr_sg.transaction_data.data_size = data.ipcDataSize();
+-        tr_sg.transaction_data.data.ptr.buffer = data.ipcData();
+-        tr_sg.transaction_data.offsets_size = data.ipcObjectsCount()*sizeof(binder_size_t);
+-        tr_sg.transaction_data.data.ptr.offsets = data.ipcObjects();
 -        tr_sg.buffers_size = data.ipcBufferSize();
 +        tr.data_size = data.ipcDataSize();
 +        tr.data.ptr.buffer = data.ipcData();
@@ -396,13 +393,13 @@ index b9ca20a..479975b 100644
 +        void* translated = usgExport(&tr);
 +        if (translated != NULL) mUsgPending.push(translated);
      } else if (statusBuffer) {
--        tr_sg.tr.flags |= TF_STATUS_CODE;
+-        tr_sg.transaction_data.flags |= TF_STATUS_CODE;
 +        tr.flags |= TF_STATUS_CODE;
          *statusBuffer = err;
--        tr_sg.tr.data_size = sizeof(status_t);
--        tr_sg.tr.data.ptr.buffer = reinterpret_cast<uintptr_t>(statusBuffer);
--        tr_sg.tr.offsets_size = 0;
--        tr_sg.tr.data.ptr.offsets = 0;
+-        tr_sg.transaction_data.data_size = sizeof(status_t);
+-        tr_sg.transaction_data.data.ptr.buffer = reinterpret_cast<uintptr_t>(statusBuffer);
+-        tr_sg.transaction_data.offsets_size = 0;
+-        tr_sg.transaction_data.data.ptr.offsets = 0;
 -        tr_sg.buffers_size = 0;
 +        tr.data_size = sizeof(status_t);
 +        tr.data.ptr.buffer = reinterpret_cast<uintptr_t>(statusBuffer);
@@ -419,7 +416,7 @@ index b9ca20a..479975b 100644
  
      return NO_ERROR;
  }
-@@ -1048,12 +1333,16 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
+@@ -1120,12 +1403,16 @@ status_t IPCThreadState::executeCommand(int32_t cmd)
                  "Not enough command data for brTRANSACTION");
              if (result != NO_ERROR) break;
  
@@ -441,7 +438,7 @@ index b9ca20a..479975b 100644
  
              const pid_t origPid = mCallingPid;
              const char* origSid = mCallingSid;
-@@ -1213,6 +1502,18 @@ void IPCThreadState::freeBuffer(Parcel* parcel, const uint8_t* data,
+@@ -1285,6 +1572,18 @@ void IPCThreadState::freeBuffer(Parcel* parcel, const uint8_t* data,
      ALOG_ASSERT(data != NULL, "Called with NULL data");
      if (parcel != NULL) parcel->closeFileDescriptors();
      IPCThreadState* state = self();
@@ -452,7 +449,7 @@ index b9ca20a..479975b 100644
 +        for (uint64_t i = 0; i < header->fdsCount; i++) {
 +            const flat_binder_object* flat = reinterpret_cast<const flat_binder_object*>(
 +                    data + header->fdsOffset + i * sizeof(flat_binder_object));
-+            if (flat->type == BINDER_TYPE_FD) close(flat->handle);
++            if (flat->hdr.type == BINDER_TYPE_FD) close(flat->handle);
 +        }
 +        data = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(header->kernelData));
 +        free(header);
@@ -461,18 +458,18 @@ index b9ca20a..479975b 100644
      state->mOut.writePointer((uintptr_t)data);
  }
 diff --git a/ProcessState.cpp b/ProcessState.cpp
-index e4e1a12..02e1d6f 100644
+index 37e3611..b12b268 100644
 --- a/ProcessState.cpp
 +++ b/ProcessState.cpp
-@@ -20,6 +20,7 @@
- 
+@@ -21,6 +21,7 @@
+ #include <cutils/atomic.h>
  #include <hwbinder/BpHwBinder.h>
  #include <hwbinder/IPCThreadState.h>
 +#include <hwbinder/Parcel.h>
  #include <hwbinder/binder_kernel.h>
- #include <utils/Atomic.h>
  #include <utils/Log.h>
-@@ -85,9 +86,37 @@ void ProcessState::setContextObject(const sp<IBinder>& object)
+ #include <utils/String8.h>
+@@ -97,9 +98,37 @@ void ProcessState::setContextObject(const sp<IBinder>& object)
      setContextObject(object, String16("default"));
  }
  
@@ -481,7 +478,7 @@ index e4e1a12..02e1d6f 100644
 +    if (mVMStart == MAP_FAILED) return false;
 +    const uint8_t* start = static_cast<const uint8_t*>(mVMStart);
 +    const uint8_t* p = static_cast<const uint8_t*>(ptr);
-+    return p >= start && p < start + BINDER_VM_SIZE;
++    return p >= start && p < start + mMmapSize;
 +}
 +
  sp<IBinder> ProcessState::getContextObject(const sp<IBinder>& /*caller*/)
@@ -511,7 +508,7 @@ index e4e1a12..02e1d6f 100644
  }
  
  void ProcessState::setContextObject(const sp<IBinder>& object, const String16& name)
-@@ -339,7 +368,8 @@ void ProcessState::giveThreadPoolName() {
+@@ -359,7 +388,8 @@ void ProcessState::giveThreadPoolName() {
  
  static int open_driver()
  {
@@ -522,13 +519,13 @@ index e4e1a12..02e1d6f 100644
          int vers = 0;
          status_t result = ioctl(fd, BINDER_VERSION, &vers);
 diff --git a/include/hwbinder/IPCThreadState.h b/include/hwbinder/IPCThreadState.h
-index a3224c3..707dbf5 100644
+index 32eea8c..8241572 100644
 --- a/include/hwbinder/IPCThreadState.h
 +++ b/include/hwbinder/IPCThreadState.h
-@@ -97,11 +97,16 @@ public:
+@@ -101,11 +101,16 @@ public:
+             bool                isLooperThread();
+             bool                isOnlyBinderThread();
  
-             // Service manager registration
-             void                setTheContextObject(sp<BHwBinder> obj);
 +
 +            // Registers the context object with servicemanager under the name
 +            // "hwservicemanager", in place of BINDER_SET_CONTEXT_MGR
@@ -542,28 +539,28 @@ index a3224c3..707dbf5 100644
              status_t            waitForResponse(Parcel *reply,
                                                  status_t *acquireResult=NULL);
              status_t            talkWithDriver(bool doReceive=true);
-@@ -137,6 +142,9 @@ private:
+@@ -141,6 +146,9 @@ private:
+             const char*         mCallingSid;
+             uid_t               mCallingUid;
              int32_t             mStrictModePolicy;
-             int32_t             mLastTransactionBinderFlags;
-             sp<BHwBinder>         mContextObject;
 +            // Transaction data translated for a kernel without scatter-gather
 +            // support, to be freed once the driver has consumed it
 +            Vector<void*>       mUsgPending;
- };
- 
- }; // namespace hardware
+             int32_t             mLastTransactionBinderFlags;
+             sp<BHwBinder>         mContextObject;
+             bool                mIsLooper;
 diff --git a/include/hwbinder/ProcessState.h b/include/hwbinder/ProcessState.h
-index 5441b75..3b7b63a 100644
+index 2f72059..c3b50a9 100644
 --- a/include/hwbinder/ProcessState.h
 +++ b/include/hwbinder/ProcessState.h
 @@ -71,6 +71,10 @@ public:
- private:
-     friend class IPCThreadState;
  
+             ssize_t             getKernelReferences(size_t count, uintptr_t* buf);
+             size_t              getMmapSize();
 +            // Whether the pointer lies in the transaction memory mapped from
 +            // the binder driver
 +            bool                isKernelBuffer(const void* ptr) const;
 +
-                                 ProcessState();
-                                 ~ProcessState();
+ private:
+     friend class IPCThreadState;
  

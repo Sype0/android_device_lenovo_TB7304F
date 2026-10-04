@@ -1,28 +1,19 @@
 diff --git a/service.cpp b/service.cpp
-index 4fdf4df..6df0225 100644
+index a3d8c2c..bfe4009 100644
 --- a/service.cpp
 +++ b/service.cpp
-@@ -97,18 +97,11 @@ int main() {
+@@ -62,8 +62,12 @@ int main() {
      // Tell IPCThreadState we're the service manager
      sp<BnHwServiceManager> service = new BnHwServiceManager(manager);
      IPCThreadState::self()->setTheContextObject(service);
--    // Then tell binder kernel
--    flat_binder_object obj {
--        .flags = FLAT_BINDER_FLAG_TXN_SECURITY_CTX,
--    };
--
--    status_t result = ioctl(binder_fd, BINDER_SET_CONTEXT_MGR_EXT, &obj);
--
--    // fallback to original method
--    if (result != 0) {
--        android_errorWriteLog(0x534e4554, "121035042");
--
--        result = ioctl(binder_fd, BINDER_SET_CONTEXT_MGR, 0);
+-    // Then tell the kernel
+-    ProcessState::self()->becomeContextManager(nullptr, nullptr);
 +    // The kernel of this device has a single binder context, which belongs to
 +    // servicemanager: become a service of it instead of a context manager
 +    while (IPCThreadState::self()->publishContextObject() != OK) {
 +        ALOGW("Waiting for servicemanager...");
 +        usleep(100000);
-     }
++    }
  
-     // Only enable FIFO inheritance for hwbinder
+     int rc = property_set("hwservicemanager.ready", "true");
+     if (rc) {

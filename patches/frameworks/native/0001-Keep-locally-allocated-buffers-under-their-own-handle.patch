@@ -1,6 +1,6 @@
 diff --git a/libs/ui/GraphicBufferAllocator.cpp b/libs/ui/GraphicBufferAllocator.cpp
---- a/libs/ui/GraphicBufferAllocator.cpp	2026-10-04 06:08:28.761131110 +0300
-+++ b/libs/ui/GraphicBufferAllocator.cpp	2026-10-04 06:09:17.451135960 +0300
+--- a/libs/ui/GraphicBufferAllocator.cpp	2026-10-04 07:30:06.871619059 +0300
++++ b/libs/ui/GraphicBufferAllocator.cpp	2026-10-04 07:30:08.354952540 +0300
 @@ -16,6 +16,9 @@
  */
  
@@ -82,8 +82,8 @@ diff --git a/libs/ui/GraphicBufferAllocator.cpp b/libs/ui/GraphicBufferAllocator
      Mutex::Autolock _l(sLock);
      KeyedVector<buffer_handle_t, alloc_rec_t>& list(sAllocList);
 diff --git a/libs/ui/GraphicBufferMapper.cpp b/libs/ui/GraphicBufferMapper.cpp
---- a/libs/ui/GraphicBufferMapper.cpp	2026-10-04 06:08:28.761131110 +0300
-+++ b/libs/ui/GraphicBufferMapper.cpp	2026-10-04 06:09:17.451135960 +0300
+--- a/libs/ui/GraphicBufferMapper.cpp	2026-10-04 07:30:07.308285769 +0300
++++ b/libs/ui/GraphicBufferMapper.cpp	2026-10-04 07:30:25.514954249 +0300
 @@ -15,6 +15,9 @@
   */
  
@@ -145,7 +145,20 @@ diff --git a/libs/ui/GraphicBufferMapper.cpp b/libs/ui/GraphicBufferMapper.cpp
  void GraphicBufferMapper::preloadHal() {
      Gralloc2::Mapper::preload();
  }
-@@ -120,6 +160,17 @@
+@@ -88,6 +128,12 @@
+ void GraphicBufferMapper::getTransportSize(buffer_handle_t handle,
+             uint32_t* outTransportNumFds, uint32_t* outTransportNumInts)
+ {
++    if (isLocalBuffer(handle)) {
++        *outTransportNumFds = static_cast<uint32_t>(handle->numFds);
++        *outTransportNumInts = static_cast<uint32_t>(handle->numInts);
++        return;
++    }
++
+     mMapper->getTransportSize(handle, outTransportNumFds, outTransportNumInts);
+ }
+ 
+@@ -146,6 +192,17 @@
  
      const uint64_t usage = static_cast<uint64_t>(
              android_convertGralloc1To0Usage(producerUsage, consumerUsage));
@@ -163,7 +176,7 @@ diff --git a/libs/ui/GraphicBufferMapper.cpp b/libs/ui/GraphicBufferMapper.cpp
      Gralloc2::Error error = mMapper->lock(handle, usage,
              asGralloc2Rect(bounds), fenceFd, vaddr);
  
-@@ -157,6 +208,17 @@
+@@ -160,6 +217,17 @@
  {
      ATRACE_CALL();
  
@@ -181,7 +194,7 @@ diff --git a/libs/ui/GraphicBufferMapper.cpp b/libs/ui/GraphicBufferMapper.cpp
      Gralloc2::YCbCrLayout layout;
      Gralloc2::Error error = mMapper->lock(handle, usage,
              asGralloc2Rect(bounds), fenceFd, &layout);
-@@ -176,6 +238,12 @@
+@@ -179,6 +247,12 @@
  {
      ATRACE_CALL();
  
@@ -195,11 +208,11 @@ diff --git a/libs/ui/GraphicBufferMapper.cpp b/libs/ui/GraphicBufferMapper.cpp
  
      return NO_ERROR;
 diff --git a/libs/ui/include/ui/GraphicBufferMapper.h b/libs/ui/include/ui/GraphicBufferMapper.h
---- a/libs/ui/include/ui/GraphicBufferMapper.h	2026-10-04 06:08:28.761131110 +0300
-+++ b/libs/ui/include/ui/GraphicBufferMapper.h	2026-10-04 06:08:51.454466704 +0300
-@@ -53,6 +53,11 @@
- 
-     status_t freeBuffer(buffer_handle_t handle);
+--- a/libs/ui/include/ui/GraphicBufferMapper.h	2026-10-04 07:30:07.821619154 +0300
++++ b/libs/ui/include/ui/GraphicBufferMapper.h	2026-10-04 07:30:08.354952540 +0300
+@@ -59,6 +59,11 @@
+     void getTransportSize(buffer_handle_t handle,
+             uint32_t* outTransportNumFds, uint32_t* outTransportNumInts);
  
 +    // Buffers that GraphicBufferAllocator allocated in this process with the
 +    // gralloc device, and that are used through their original handle
