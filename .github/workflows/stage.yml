@@ -136,7 +136,7 @@ jobs:
             source build/envsetup.sh &&
             lunch "lineage_${DEVICE}-userdebug" &&
             # What this tree adds or changes comes first, to fail early
-            timeout 60m make -j$(nproc) libhwbinder hwservicemanager libmtk_symbols libmtk_gui libmtk_icu libmtk_ifc \
+            timeout 60m make -j$(nproc) libui libhwbinder hwservicemanager libmtk_symbols libmtk_gui libmtk_icu libmtk_ifc \
               android.hardware.wifi@1.0-service wpa_supplicant selinux_policy > /out/build.log 2>&1 &&
             timeout 255m make -j$(nproc) bacon >> /out/build.log 2>&1' || status=$?
           tail -n 20 /home/runner/out/build.log

@@ -3,7 +3,7 @@
 on post-fs
     mkdir /cache/bootlog 0755 root root
 
-service bootlog /system/bin/logcat -b all -v threadtime -f /cache/bootlog/logcat.txt -r 8192 -n 6
+service bootlog /system/bin/logcat -b all -v threadtime -f /cache/bootlog/logcat.txt -r 8192 -n 24
     class main
     user root
     group root system log

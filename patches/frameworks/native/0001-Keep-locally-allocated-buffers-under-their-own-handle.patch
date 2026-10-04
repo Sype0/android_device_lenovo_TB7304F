@@ -1,0 +1,211 @@
+diff --git a/libs/ui/GraphicBufferAllocator.cpp b/libs/ui/GraphicBufferAllocator.cpp
+--- a/libs/ui/GraphicBufferAllocator.cpp	2026-10-04 06:08:28.761131110 +0300
++++ b/libs/ui/GraphicBufferAllocator.cpp	2026-10-04 06:09:17.451135960 +0300
+@@ -16,6 +16,9 @@
+ */
+ 
+ #define LOG_TAG "GraphicBufferAllocator"
++
++// The code for buffers allocated in this process is not held to -Weverything
++#pragma clang diagnostic ignored "-Weverything"
+ #define ATRACE_TAG ATRACE_TAG_GRAPHICS
+ 
+ #include <ui/GraphicBufferAllocator.h>
+@@ -32,11 +35,28 @@
+ #include <ui/Gralloc2.h>
+ #include <ui/GraphicBufferMapper.h>
+ 
++#include <hardware/gralloc.h>
++
+ namespace android {
+ // ---------------------------------------------------------------------------
+ 
+ ANDROID_SINGLETON_STATIC_INSTANCE( GraphicBufferAllocator )
+ 
++// See GraphicBufferMapper.cpp: buffers are allocated in this process
++static alloc_device_t* localDevice() {
++    static alloc_device_t* device = [] {
++        const hw_module_t* module = nullptr;
++        alloc_device_t* dev = nullptr;
++        if (hw_get_module(GRALLOC_HARDWARE_MODULE_ID, &module) != 0
++                || gralloc_open(module, &dev) != 0) {
++            ALOGE("Failed to open the gralloc device");
++            dev = nullptr;
++        }
++        return dev;
++    }();
++    return device;
++}
++
+ Mutex GraphicBufferAllocator::sLock;
+ KeyedVector<buffer_handle_t,
+     GraphicBufferAllocator::alloc_rec_t> GraphicBufferAllocator::sAllocList;
+@@ -108,14 +128,16 @@
+     if (layerCount < 1)
+         layerCount = 1;
+ 
+-    Gralloc2::IMapper::BufferDescriptorInfo info = {};
+-    info.width = width;
+-    info.height = height;
+-    info.layerCount = layerCount;
+-    info.format = static_cast<Gralloc2::PixelFormat>(format);
+-    info.usage = usage;
+-
+-    Gralloc2::Error error = mAllocator->allocate(info, stride, handle);
++    alloc_device_t* device = localDevice();
++    int outStride = 0;
++    Gralloc2::Error error = Gralloc2::Error::NO_RESOURCES;
++    if (device != nullptr && device->alloc(device, static_cast<int>(width),
++            static_cast<int>(height), format, static_cast<int>(usage), handle,
++            &outStride) == 0) {
++        *stride = static_cast<uint32_t>(outStride);
++        mMapper.adoptLocalBuffer(*handle);
++        error = Gralloc2::Error::NONE;
++    }
+     if (error == Gralloc2::Error::NONE) {
+         Mutex::Autolock _l(sLock);
+         KeyedVector<buffer_handle_t, alloc_rec_t>& list(sAllocList);
+@@ -145,9 +167,12 @@
+ {
+     ATRACE_CALL();
+ 
+-    // We allocated a buffer from the allocator and imported it into the
+-    // mapper to get the handle.  We just need to free the handle now.
+-    mMapper.freeBuffer(handle);
++    if (mMapper.releaseLocalBuffer(handle)) {
++        alloc_device_t* device = localDevice();
++        device->free(device, handle);
++    } else {
++        mMapper.freeBuffer(handle);
++    }
+ 
+     Mutex::Autolock _l(sLock);
+     KeyedVector<buffer_handle_t, alloc_rec_t>& list(sAllocList);
+diff --git a/libs/ui/GraphicBufferMapper.cpp b/libs/ui/GraphicBufferMapper.cpp
+--- a/libs/ui/GraphicBufferMapper.cpp	2026-10-04 06:08:28.761131110 +0300
++++ b/libs/ui/GraphicBufferMapper.cpp	2026-10-04 06:09:17.451135960 +0300
+@@ -15,6 +15,9 @@
+  */
+ 
+ #define LOG_TAG "GraphicBufferMapper"
++
++// The code for buffers allocated in this process is not held to -Weverything
++#pragma clang diagnostic ignored "-Weverything"
+ #define ATRACE_TAG ATRACE_TAG_GRAPHICS
+ //#define LOG_NDEBUG 0
+ 
+@@ -27,6 +30,11 @@
+ #pragma clang diagnostic push
+ #pragma clang diagnostic ignored "-Wzero-length-array"
+ #include <sync/sync.h>
++
++#include <mutex>
++#include <unordered_set>
++
++#include <hardware/gralloc.h>
+ #pragma clang diagnostic pop
+ 
+ #include <utils/Log.h>
+@@ -42,6 +50,38 @@
+ 
+ ANDROID_SINGLETON_STATIC_INSTANCE( GraphicBufferMapper )
+ 
++// The gralloc of this device keeps a kernel side record of every buffer that
++// goes away when the allocating handle is freed, so the allocation cannot be
++// handed over to an imported copy the way the mapper HAL wants it. Buffers
++// allocated in this process keep their original handle instead, as they did
++// before Android 8.0, and are locked through the gralloc module directly.
++static std::mutex gLocalLock;
++static std::unordered_set<buffer_handle_t> gLocalBuffers;
++
++static const gralloc_module_t* localModule() {
++    static const gralloc_module_t* module = [] {
++        const hw_module_t* m = nullptr;
++        if (hw_get_module(GRALLOC_HARDWARE_MODULE_ID, &m) != 0) m = nullptr;
++        return reinterpret_cast<const gralloc_module_t*>(m);
++    }();
++    return module;
++}
++
++static bool isLocalBuffer(buffer_handle_t handle) {
++    std::lock_guard<std::mutex> lock(gLocalLock);
++    return gLocalBuffers.count(handle) != 0;
++}
++
++void GraphicBufferMapper::adoptLocalBuffer(buffer_handle_t handle) {
++    std::lock_guard<std::mutex> lock(gLocalLock);
++    gLocalBuffers.insert(handle);
++}
++
++bool GraphicBufferMapper::releaseLocalBuffer(buffer_handle_t handle) {
++    std::lock_guard<std::mutex> lock(gLocalLock);
++    return gLocalBuffers.erase(handle) != 0;
++}
++
+ void GraphicBufferMapper::preloadHal() {
+     Gralloc2::Mapper::preload();
+ }
+@@ -120,6 +160,17 @@
+ 
+     const uint64_t usage = static_cast<uint64_t>(
+             android_convertGralloc1To0Usage(producerUsage, consumerUsage));
++
++    if (isLocalBuffer(handle)) {
++        if (fenceFd >= 0) {
++            sync_wait(fenceFd, -1);
++            close(fenceFd);
++        }
++        const gralloc_module_t* module = localModule();
++        return module->lock(module, handle, static_cast<int>(usage), bounds.left, bounds.top,
++                bounds.width(), bounds.height(), vaddr);
++    }
++
+     Gralloc2::Error error = mMapper->lock(handle, usage,
+             asGralloc2Rect(bounds), fenceFd, vaddr);
+ 
+@@ -157,6 +208,17 @@
+ {
+     ATRACE_CALL();
+ 
++    if (isLocalBuffer(handle)) {
++        if (fenceFd >= 0) {
++            sync_wait(fenceFd, -1);
++            close(fenceFd);
++        }
++        const gralloc_module_t* module = localModule();
++        if (module->lock_ycbcr == nullptr) return INVALID_OPERATION;
++        return module->lock_ycbcr(module, handle, static_cast<int>(usage), bounds.left,
++                bounds.top, bounds.width(), bounds.height(), ycbcr);
++    }
++
+     Gralloc2::YCbCrLayout layout;
+     Gralloc2::Error error = mMapper->lock(handle, usage,
+             asGralloc2Rect(bounds), fenceFd, &layout);
+@@ -176,6 +238,12 @@
+ {
+     ATRACE_CALL();
+ 
++    if (isLocalBuffer(handle)) {
++        const gralloc_module_t* module = localModule();
++        *fenceFd = -1;
++        return module->unlock(module, handle);
++    }
++
+     *fenceFd = mMapper->unlock(handle);
+ 
+     return NO_ERROR;
+diff --git a/libs/ui/include/ui/GraphicBufferMapper.h b/libs/ui/include/ui/GraphicBufferMapper.h
+--- a/libs/ui/include/ui/GraphicBufferMapper.h	2026-10-04 06:08:28.761131110 +0300
++++ b/libs/ui/include/ui/GraphicBufferMapper.h	2026-10-04 06:08:51.454466704 +0300
+@@ -53,6 +53,11 @@
+ 
+     status_t freeBuffer(buffer_handle_t handle);
+ 
++    // Buffers that GraphicBufferAllocator allocated in this process with the
++    // gralloc device, and that are used through their original handle
++    void adoptLocalBuffer(buffer_handle_t handle);
++    bool releaseLocalBuffer(buffer_handle_t handle);
++
+     status_t lock(buffer_handle_t handle,
+             uint32_t usage, const Rect& bounds, void** vaddr);
+ 
