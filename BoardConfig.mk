@@ -102,6 +102,11 @@ TARGET_LD_SHIM_LIBS := \
     /system/vendor/lib64/libaal.so|libmtk_gui.so \
     /system/vendor/lib64/libcam.utils.sensorlistener.so|libsensor.so \
     /system/vendor/lib64/libdrmmtkutil.so|libmtk_icu.so \
+    /system/vendor/lib/libsrv_um.so|libutilscallstack.so \
+    /system/vendor/lib/libgui_ext.so|libmtk_symbols.so \
+    /system/vendor/lib64/libsrv_um.so|libutilscallstack.so \
+    /system/vendor/lib64/libgui_ext.so|libmtk_symbols.so \
+    /system/vendor/lib/libMtkOmxVdecEx.so|libmtk_symbols.so \
     /system/vendor/bin/thermalindicator|libmtk_gui.so \
     /system/vendor/bin/thermal|libmtk_ifc.so
 

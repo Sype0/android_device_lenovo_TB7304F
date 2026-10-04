@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <unistd.h>
 #include <string>
 
 struct native_handle;
@@ -26,6 +27,16 @@ void _ZN7android13GraphicBufferC1EjjijjP13native_handleb(
         uint32_t inStride, native_handle* inHandle, bool keepOwnership) {
     _ZN7android13GraphicBufferC1EjjijjjP13native_handleb(
             thiz, inWidth, inHeight, inFormat, 1, inUsage, inStride, inHandle, keepOwnership);
+}
+
+// The destructor of android::Fence is inline since Android 9. The object is a
+// reference count followed by the file descriptor.
+void _ZN7android5FenceD1Ev(void* thiz) {
+    int* fd = static_cast<int*>(thiz) + 1;
+    if (*fd != -1) {
+        close(*fd);
+        *fd = -1;
+    }
 }
 
 }
