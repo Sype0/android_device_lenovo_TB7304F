@@ -124,6 +124,31 @@ jobs:
             sed -i "s/if (mHidlFactory != 0 \&\& strcmp(AUDIO_HARDWARE_MODULE_ID_A2DP, name) != 0/if (false \&\& mHidlFactory != 0 \&\& strcmp(AUDIO_HARDWARE_MODULE_ID_A2DP, name) != 0/" \
               frameworks/av/media/libaudiohal/2.0/DevicesFactoryHalHybrid.cpp
             grep -q "if (false && mHidlFactory" frameworks/av/media/libaudiohal/2.0/DevicesFactoryHalHybrid.cpp
+            # The stock audio HAL was built for Android 7.0: what the stream
+            # structures gained since is not there to be called
+            f=frameworks/av/media/libaudiohal/2.0/StreamHalLocal.cpp
+            sed -i -e "s/if (mStream->update_source_metadata == nullptr) {/if (true) {/" \
+              -e "s/if (mStream->update_sink_metadata == nullptr) {/if (true) {/" \
+              -e "s/if (mStream->start == NULL) return INVALID_OPERATION;/if (true) return INVALID_OPERATION;/" \
+              -e "s/if (mStream->stop == NULL) return INVALID_OPERATION;/if (true) return INVALID_OPERATION;/" \
+              -e "s/if (mStream->create_mmap_buffer == NULL) return INVALID_OPERATION;/if (true) return INVALID_OPERATION;/" \
+              -e "s/if (mStream->get_mmap_position == NULL) return INVALID_OPERATION;/if (true) return INVALID_OPERATION;/" $f
+            test "$(grep -c "if (true)" $f)" = 10
+            # The GL driver leaves errors behind that the checks of hwui take
+            # for fatal
+            sed -i "s/LOG_ALWAYS_FATAL_IF(lastError != GL_NO_ERROR,/ALOGE_IF(lastError != GL_NO_ERROR,/" \
+              frameworks/base/libs/hwui/debug/GlesErrorCheckWrapper.cpp
+            grep -q "ALOGE_IF(lastError != GL_NO_ERROR," frameworks/base/libs/hwui/debug/GlesErrorCheckWrapper.cpp
+            # The kernel has no sdcardfs, and the sdcard daemon of Android 9
+            # has nothing else: bring back the one of 8.1 with its FUSE
+            # implementation, and let it take the two new options
+            git clone -q --depth=1 -b lineage-15.1 https://github.com/LineageOS/android_system_core /tmp/core-15.1
+            rm -rf system/core/sdcard && cp -r /tmp/core-15.1/sdcard system/core/sdcard && rm -rf /tmp/core-15.1
+            sed -i -e "s/\"u:g:U:mwG\"/\"u:g:U:mwGio\"/" \
+              -e "s/^            case .?.:\$/            case \x27i\x27:\n            case \x27o\x27:\n                break;\n&/" system/core/sdcard/sdcard.cpp
+            grep -q "u:g:U:mwGio" system/core/sdcard/sdcard.cpp
+            grep -q "case .i.:" system/core/sdcard/sdcard.cpp
+            sed -i "s/ -Werror//" system/core/sdcard/Android.mk
             # No kernel source: the generated kernel headers are an empty
             # directory, the modules that ask for them use the ones of bionic
             sed -i "s|^    cmd: \"make \$(KERNEL_MAKE_FLAGS).*headers_install\",|    cmd: \"mkdir -p \$(genDir)/usr/include \$(genDir)/usr/techpack/audio/include\",|" \
@@ -154,7 +179,7 @@ jobs:
             lunch "lineage_${DEVICE}-userdebug" &&
             # What this tree adds or changes comes first, to fail early
             timeout 90m make -j$(nproc) libui libhwbinder hwservicemanager libmtk_symbols libmtk_gui libmtk_icu libmtk_ifc \
-              libaudiohal android.hardware.bluetooth@1.0-service android.hardware.wifi@1.0-service wpa_supplicant selinux_policy > /out/build.log 2>&1 &&
+              libaudiohal sdcard android.hardware.bluetooth@1.0-service android.hardware.wifi@1.0-service wpa_supplicant selinux_policy > /out/build.log 2>&1 &&
             timeout 235m make -j$(nproc) bacon >> /out/build.log 2>&1' || status=$?
           tail -n 20 /home/runner/out/build.log
           df -h /
