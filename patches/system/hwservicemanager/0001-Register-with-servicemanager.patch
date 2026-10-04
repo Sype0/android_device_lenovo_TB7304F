@@ -1,5 +1,5 @@
 diff --git a/service.cpp b/service.cpp
-index a3d8c2c..bfe4009 100644
+index a3d8c2c..671e9ed 100644
 --- a/service.cpp
 +++ b/service.cpp
 @@ -62,8 +62,12 @@ int main() {
@@ -10,7 +10,7 @@ index a3d8c2c..bfe4009 100644
 -    ProcessState::self()->becomeContextManager(nullptr, nullptr);
 +    // The kernel of this device has a single binder context, which belongs to
 +    // servicemanager: become a service of it instead of a context manager
-+    while (IPCThreadState::self()->publishContextObject() != OK) {
++    while (IPCThreadState::self()->publishContextObject() != android::OK) {
 +        ALOGW("Waiting for servicemanager...");
 +        usleep(100000);
 +    }
