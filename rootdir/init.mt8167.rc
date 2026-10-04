@@ -15,6 +15,14 @@ service vndservicemanager /system/bin/true
     disabled
     oneshot
 
+# The stock sensors HAL reads the accelerometer from an input device, which
+# takes the input group; this definition comes before the one of the HAL
+service sensors-hal-1-0 /vendor/bin/hw/android.hardware.sensors@1.0-service
+    class hal
+    user system
+    group system wakelock input
+    capabilities BLOCK_SUSPEND SYS_NICE
+
 on early-init
     symlink /dev/binder /dev/hwbinder
     symlink /dev/binder /dev/vndbinder
