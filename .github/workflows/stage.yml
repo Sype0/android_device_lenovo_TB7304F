@@ -120,6 +120,14 @@ jobs:
             sed -i "s/^LOCAL_MODULE := android.hardware.bluetooth@1.0-service\$/&\nLOCAL_MULTILIB := 32/" \
               hardware/interfaces/bluetooth/1.0/default/Android.mk
             grep -q "LOCAL_MULTILIB := 32" hardware/interfaces/bluetooth/1.0/default/Android.mk
+            # System calls of the stock codecs that the sandbox of the codec
+            # service does not expect
+            for call in eventfd2 fchmodat fchownat flock fsync getsockopt mlock munlock pselect6 \
+                recvfrom sched_getparam sched_getscheduler sched_setaffinity sendto sysinfo; do
+              grep -q "^$call:" frameworks/av/services/mediacodec/seccomp_policy/mediacodec-arm.policy ||
+                echo "$call: 1" >> frameworks/av/services/mediacodec/seccomp_policy/mediacodec-arm.policy
+            done
+            grep -q "^pselect6: 1" frameworks/av/services/mediacodec/seccomp_policy/mediacodec-arm.policy
             # The history is not needed to build, the space is
             rm -rf .repo/project-objects .repo/projects'
           df -h /
