@@ -13,4 +13,8 @@
        does not have yet: take it from before -->
   <remove-project name="LineageOS/android_packages_services_Mms" />
   <project path="packages/services/Mms" name="LineageOS/android_packages_services_Mms" remote="github" revision="3abc1b0a40acd30e72ddca74d4f16ec54da1af0b" />
+  <!-- The 2026 Telecom service needs StatusHints and ITelecomService changes
+       that this ROM does not have: take it from before -->
+  <remove-project name="LineageOS/android_packages_services_Telecomm" />
+  <project path="packages/services/Telecomm" name="LineageOS/android_packages_services_Telecomm" remote="github" revision="5262e03c5ccb83143203e9da5de21fd9ab28aef3" groups="pdk-cw-fs,pdk-fs" />
 </manifest>
