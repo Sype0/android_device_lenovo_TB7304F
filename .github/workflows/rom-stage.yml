@@ -108,8 +108,20 @@ jobs:
 
       - name: Sync the ${{ inputs.rom }} sources
         run: |
-          docker exec -e MANIFEST="$MANIFEST" -e BRANCH="$BRANCH" build bash /src/in-container.sh bash -c '
+          docker exec -e MANIFEST="$MANIFEST" -e BRANCH="$BRANCH" -e ROM="$ROM" build bash /src/in-container.sh bash -c '
             repo init --depth=1 -u "$MANIFEST" -b "$BRANCH" -g default,-darwin || exit 1
+            # Some ROMs take hwbinder from AOSP, where the patches of this tree
+            # do not apply: use the LineageOS one like the others do
+            mkdir -p .repo/local_manifests
+            if [ "$ROM" = rr ] || [ "$ROM" = crdroid ]; then
+              echo "<manifest>" > .repo/local_manifests/lineage-hwbinder.xml
+              for p in libhwbinder hwservicemanager; do
+                echo "  <remove-project name=\"platform/system/$p\" />
+            <project path=\"system/$p\" name=\"LineageOS/android_system_$p\" remote=\"github\" revision=\"refs/heads/lineage-15.1\" />"
+              done >> .repo/local_manifests/lineage-hwbinder.xml
+              echo "</manifest>" >> .repo/local_manifests/lineage-hwbinder.xml
+              cat .repo/local_manifests/lineage-hwbinder.xml
+            fi
             synced=false
             for attempt in 1 2 3 4 5 6; do
               repo sync -c -j6 --force-sync --no-clone-bundle --no-tags > /out/sync.log 2>&1 && synced=true && break
