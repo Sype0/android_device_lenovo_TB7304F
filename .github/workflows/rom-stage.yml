@@ -102,7 +102,7 @@ jobs:
           cd /src
           "$@"
           SCRIPT
-          docker run -d --name build --network host -v "$SRC:/src" -v /home/runner/out:/out -v /home/runner/ccache:/ccache \
+          docker run -d --name build --dns 8.8.8.8 --dns 1.1.1.1 -v "$SRC:/src" -v /home/runner/out:/out -v /home/runner/ccache:/ccache \
             -v "$GITHUB_WORKSPACE/tree:/tree:ro" \
             ubuntu:18.04 sleep infinity
 
