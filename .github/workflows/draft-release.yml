@@ -1,0 +1,42 @@
+# Puts the artifacts of a build into a draft release, which only the people
+# with write access see. Release assets download from other servers than the
+# artifacts do. Write "<run id> <artifact name>" into `request` and push.
+name: Draft release from a build
+
+on:
+  push:
+    branches: [draft-release]
+    paths: [request]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  draft:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the request
+        run: |
+          read -r run artifact < request
+          echo "RUN=$run" >> "$GITHUB_ENV"
+          echo "ARTIFACT=$artifact" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT }}
+          run-id: ${{ env.RUN }}
+          github-token: ${{ github.token }}
+          path: dist
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dist
+          (cd dist && sha256sum -c sha256sums.txt)
+          gh release create "$ARTIFACT-$RUN" dist/* -R "$GITHUB_REPOSITORY" --draft \
+            --target oreo-roms --title "$ARTIFACT (run $RUN)" \
+            --notes "Untested build of run $RUN."
