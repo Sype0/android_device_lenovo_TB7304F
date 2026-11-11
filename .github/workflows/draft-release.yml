@@ -1,0 +1,40 @@
+# Puts the artifacts of a build into a draft release, which only the people
+# with write access see. Release assets download from other servers than the
+# artifacts do.
+name: Draft release from a build
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Run that built the ROM
+        required: true
+      artifact:
+        description: Name of its artifact, e.g. aicp-8.1-TB7304F
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  draft:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact }}
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: dist
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.artifact }}-${{ inputs.run_id }}
+        run: |
+          ls -l dist
+          (cd dist && sha256sum -c sha256sums.txt)
+          gh release create "$TAG" dist/* -R "$GITHUB_REPOSITORY" --draft \
+            --target "$GITHUB_SHA" --title "$TAG" \
+            --notes "Untested build of run ${{ inputs.run_id }}."
