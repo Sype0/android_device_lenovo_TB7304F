@@ -110,17 +110,10 @@ jobs:
         run: |
           docker exec -e MANIFEST="$MANIFEST" -e BRANCH="$BRANCH" -e ROM="$ROM" build bash /src/in-container.sh bash -c '
             repo init --depth=1 -u "$MANIFEST" -b "$BRANCH" -g default,-darwin || exit 1
-            # Some ROMs take hwbinder from AOSP, where the patches of this tree
-            # do not apply: use the LineageOS one like the others do
+            # What this tree changes in the manifest of the ROM
             mkdir -p .repo/local_manifests
-            if [ "$ROM" = rr ] || [ "$ROM" = crdroid ]; then
-              echo "<manifest>" > .repo/local_manifests/lineage-hwbinder.xml
-              for p in libhwbinder hwservicemanager; do
-                echo "  <remove-project name=\"platform/system/$p\" />
-            <project path=\"system/$p\" name=\"LineageOS/android_system_$p\" remote=\"github\" revision=\"refs/heads/lineage-15.1\" />"
-              done >> .repo/local_manifests/lineage-hwbinder.xml
-              echo "</manifest>" >> .repo/local_manifests/lineage-hwbinder.xml
-              cat .repo/local_manifests/lineage-hwbinder.xml
+            if [ -f /tree/manifests/$ROM.xml ]; then
+              cp /tree/manifests/$ROM.xml .repo/local_manifests/tree.xml
             fi
             synced=false
             for attempt in 1 2 3 4 5 6; do
