@@ -6,4 +6,9 @@
   <project path="system/libhwbinder" name="LineageOS/android_system_libhwbinder" remote="github" revision="refs/heads/lineage-15.1" groups="pdk" />
   <remove-project name="platform/system/hwservicemanager" />
   <project path="system/hwservicemanager" name="LineageOS/android_system_hwservicemanager" remote="github" revision="refs/heads/lineage-15.1" groups="pdk" />
+  <!-- The lineage-15.1 branch of the WebView is gone: take master, as AICP does -->
+  <remove-project name="LineageOS/android_external_chromium-webview" />
+  <project path="external/chromium-webview" name="LineageOS/android_external_chromium-webview" remote="github" revision="master" clone-depth="1" groups="pdk" />
+  <!-- Gone; Oreo leaves out the missing product package -->
+  <remove-project name="crdroidandroid/android_packages_apps_crDroidFileManager" />
 </manifest>
