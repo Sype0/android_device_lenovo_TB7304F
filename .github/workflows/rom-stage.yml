@@ -140,11 +140,17 @@ jobs:
 
       - name: Patch the sources
         run: |
-          docker exec build bash /src/in-container.sh bash -c '
+          docker exec -e ROM="$ROM" build bash /src/in-container.sh bash -c '
             set -e
-            (cd /tree/patches && find . -name "*.patch" | sort) | while read -r p; do
-              echo "Applying $p"
-              patch -d "$(dirname "$p")" -p1 --no-backup-if-mismatch < "/tree/patches/$p"
+            # The patches of the tree, then those of this ROM; a .revert.patch
+            # is a change of the ROM sources taken back out
+            for dir in /tree/patches /tree/patches-$ROM; do
+              [ -d $dir ] || continue
+              (cd $dir && find . -name "*.patch" | sort) | while read -r p; do
+                echo "Applying $dir/$p"
+                case "$p" in *.revert.patch) reverse=-R ;; *) reverse= ;; esac
+                patch -d "$(dirname "$p")" -p1 $reverse --no-backup-if-mismatch < "$dir/$p"
+              done
             done
             # The stock sensors HAL implements the 1.0 device API
             sed -i "s/CHECK_GE(getHalDeviceVersion(), SENSORS_DEVICE_API_VERSION_1_3)/CHECK_GE(getHalDeviceVersion(), SENSORS_DEVICE_API_VERSION_1_0)/" \

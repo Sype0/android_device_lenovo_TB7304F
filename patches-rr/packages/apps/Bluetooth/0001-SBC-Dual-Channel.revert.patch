@@ -1,0 +1,39 @@
+Revert of LineageOS c885854d5a83 "SBC Dual Channel (SBC HD Audio) support":
+the frameworks/base of this ROM does not have CHANNEL_MODE_DUAL_CHANNEL.
+
+diff --git a/src/com/android/bluetooth/a2dp/A2dpService.java b/src/com/android/bluetooth/a2dp/A2dpService.java
+index bdab866fc..e7fb8e601 100755
+--- a/src/com/android/bluetooth/a2dp/A2dpService.java
++++ b/src/com/android/bluetooth/a2dp/A2dpService.java
+@@ -68,7 +68,11 @@ public void onReceive(Context context, Intent intent) {
+             boolean supportsOptional = false;
+             for (BluetoothCodecConfig config :
+                     mStateMachine.getCodecStatus().getCodecsSelectableCapabilities()) {
+-                if (!config.isMandatoryCodec()) {
++                if (!(config.isMandatoryCodec())
++                        || (config.isMandatoryCodec()
++                                   && (config.getChannelMode() & config.CHANNEL_MODE_DUAL_CHANNEL)
++                                           == config.CHANNEL_MODE_DUAL_CHANNEL)) {
++                    /* SBC Dual Channel capability */
+                     supportsOptional = true;
+                     break;
+                 }
+diff --git a/src/com/android/bluetooth/a2dp/A2dpStateMachine.java b/src/com/android/bluetooth/a2dp/A2dpStateMachine.java
+index 82ed7e0b4..c7e4fb264 100755
+--- a/src/com/android/bluetooth/a2dp/A2dpStateMachine.java
++++ b/src/com/android/bluetooth/a2dp/A2dpStateMachine.java
+@@ -843,6 +843,14 @@ void enableOptionalCodecs() {
+             BluetoothCodecConfig codecConfig = codecConfigArray[i];
+             if (!codecConfig.isMandatoryCodec()) {
+                 codecConfigArray[i] = null;
++            } else {
++                /* Rebuild SBC selectable codec with Dual Channel (SBC HD audio) */
++                codecConfigArray[i] = new BluetoothCodecConfig(
++                        BluetoothCodecConfig.SOURCE_CODEC_TYPE_SBC, mA2dpSourceCodecPrioritySbc,
++                        BluetoothCodecConfig.SAMPLE_RATE_NONE,
++                        BluetoothCodecConfig.BITS_PER_SAMPLE_NONE,
++                        BluetoothCodecConfig.CHANNEL_MODE_DUAL_CHANNEL, 0 /* codecSpecific1 */,
++                        0 /* codecSpecific2 */, 0 /* codecSpecific3 */, 0 /* codecSpecific4 */);
+             }
+         }
+ 
