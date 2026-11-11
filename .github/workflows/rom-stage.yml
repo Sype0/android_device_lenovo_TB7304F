@@ -1,4 +1,4 @@
-# One attempt at building LineageOS 15.1 for the Lenovo TB-7304F inside an
+# One attempt at building an Oreo (8.1) ROM for the Lenovo TB-7304F inside an
 # Ubuntu 18.04 container. A job may run for six hours at most, so the build is
 # cut short before that and the next stage carries on from the compiler cache.
 name: Build stage
@@ -6,6 +6,10 @@ name: Build stage
 on:
   workflow_call:
     inputs:
+      rom:
+        description: crdroid, aicp, aokp or rr
+        type: string
+        required: true
       stage:
         type: number
         required: true
@@ -18,6 +22,7 @@ env:
   DEVICE: TB7304F
   DEVICE_PATH: device/lenovo/TB7304F
   SRC: /mnt/los
+  ROM: ${{ inputs.rom }}
 
 jobs:
   build:
@@ -27,6 +32,19 @@ jobs:
       done: ${{ steps.build.outputs.done }}
 
     steps:
+      - name: Pick the ROM
+        run: |
+          case "$ROM" in
+            crdroid) m=https://github.com/crdroidandroid/android; b=8.1; p=lineage ;;
+            aicp)    m=https://github.com/AICP/platform_manifest; b=o8.1; p=aicp ;;
+            aokp)    m=https://github.com/AOKP/platform_manifest; b=oreo; p=aokp ;;
+            rr)      m=https://github.com/ResurrectionRemix/platform_manifest; b=oreo; p=rr ;;
+            *) echo "Unknown ROM $ROM"; exit 1 ;;
+          esac
+          echo "MANIFEST=$m" >> "$GITHUB_ENV"
+          echo "BRANCH=$b" >> "$GITHUB_ENV"
+          echo "PREFIX=$p" >> "$GITHUB_ENV"
+
       - name: Free up disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
@@ -44,8 +62,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: /home/runner/ccache
-          key: ccache15-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stage }}
-          restore-keys: ccache15-
+          key: ccache-${{ inputs.rom }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stage }}
+          restore-keys: |
+            ccache-${{ inputs.rom }}-
+            ccache15-
 
       - name: Prepare the build container
         run: |
@@ -53,13 +73,13 @@ jobs:
           sudo chown "$USER" "$SRC" /home/runner/out /home/runner/ccache
           cat > "$SRC/in-container.sh" <<'SCRIPT'
           set -e
-          export DEBIAN_FRONTEND=noninteractive LC_ALL=C USER=root
+          export DEBIAN_FRONTEND=noninteractive LC_ALL=C USER=root TERM=dumb
           if ! command -v repo > /dev/null; then
             apt-get update > /dev/null
             apt-get install -y --no-install-recommends \
               bc bison build-essential ca-certificates curl flex g++-multilib gcc-multilib git gnupg gperf \
               imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev \
-              libssl-dev libxml2 libxml2-utils lzop openjdk-8-jdk-headless patch pngcrush python python3 rsync \
+              libssl-dev libxml2 libxml2-utils lzop openjdk-8-jdk-headless openssl patch pngcrush python python3 rsync \
               schedtool squashfs-tools unzip xsltproc zip zlib1g-dev > /dev/null
             # Jack talks TLSv1 to its own server
             sed -i 's/TLSv1, TLSv1.1, //' /etc/java-8-openjdk/security/java.security
@@ -82,16 +102,21 @@ jobs:
             -v "$GITHUB_WORKSPACE/tree:/tree:ro" \
             ubuntu:18.04 sleep infinity
 
-      - name: Sync the LineageOS sources
+      - name: Sync the ${{ inputs.rom }} sources
         run: |
-          docker exec build bash /src/in-container.sh bash -c '
-            repo init --depth=1 -u https://github.com/LineageOS/android.git -b lineage-15.1 -g default,-darwin &&
+          docker exec -e MANIFEST="$MANIFEST" -e BRANCH="$BRANCH" build bash /src/in-container.sh bash -c '
+            repo init --depth=1 -u "$MANIFEST" -b "$BRANCH" -g default,-darwin || exit 1
+            synced=false
             for attempt in 1 2 3 4 5 6; do
-              repo sync -c -j6 --force-sync --no-clone-bundle --no-tags && break
+              repo sync -c -j6 --force-sync --no-clone-bundle --no-tags > /out/sync.log 2>&1 && synced=true && break
+              tail -n 30 /out/sync.log
+              # Old manifests point at some repositories that are gone
+              python3 /tree/tools/drop_gone_projects.py /out/sync.log "$MANIFEST"
               echo "Sync attempt $attempt failed" && sleep 60
             done
-            test -f build/envsetup.sh &&
+            $synced && test -f build/envsetup.sh &&
             for d in external/chromium-webview/prebuilt/arm external/chromium-webview/prebuilt/arm64; do
+              [ -d $d ] || continue
               if ! unzip -tq $d/webview.apk > /dev/null 2>&1; then
                 git -C $d lfs pull $(git -C $d remote | head -n1) &&
                 unzip -tq $d/webview.apk > /dev/null || exit 1
@@ -136,17 +161,17 @@ jobs:
         id: build
         run: |
           status=0
-          docker exec -e DEVICE="$DEVICE" build bash /src/in-container.sh bash -c '
+          docker exec -e DEVICE="$DEVICE" -e PREFIX="$PREFIX" build bash /src/in-container.sh bash -c '
             export OUT_DIR=/out
             export USE_CCACHE=1 CCACHE_DIR=/ccache CCACHE_COMPRESS=1
-            prebuilts/misc/linux-x86/ccache/ccache -M 8G > /dev/null
+            prebuilts/misc/linux-x86/ccache/ccache -M 5G > /dev/null
             export ANDROID_JACK_VM_ARGS="-Dfile.encoding=UTF-8 -XX:+TieredCompilation -Xmx6g"
-            source build/envsetup.sh &&
-            lunch "lineage_${DEVICE}-userdebug" &&
+            source build/envsetup.sh < /dev/null &&
+            lunch "${PREFIX}_${DEVICE}-userdebug" < /dev/null &&
             # What this tree adds or changes comes first, to fail early
             timeout 60m make -j$(nproc) libui libhwbinder hwservicemanager libmtk_symbols libmtk_gui libmtk_icu libmtk_ifc \
               android.hardware.wifi@1.0-service wpa_supplicant selinux_policy > /out/build.log 2>&1 &&
-            timeout 255m make -j$(nproc) bacon >> /out/build.log 2>&1' || status=$?
+            timeout 255m make -j$(nproc) bacon < /dev/null >> /out/build.log 2>&1' || status=$?
           tail -n 20 /home/runner/out/build.log
           df -h /
           if [ $status -eq 124 ]; then
@@ -163,10 +188,13 @@ jobs:
         if: steps.build.outputs.done == 'true'
         run: |
           mkdir dist
-          cp -v /home/runner/out/target/product/$DEVICE/lineage-15.1-*.zip dist/
+          # The flashable zip, whatever the ROM calls it
+          find /home/runner/out/target/product/$DEVICE -maxdepth 1 -name "*.zip" ! -name "*ota*" -size +100M \
+            -exec cp -v {} dist/ \;
+          ls dist/*.zip > /dev/null
           # The bootloader only accepts kernels and ramdisks with MediaTek headers
           python3 tree/tools/mtk_header.py /home/runner/out/target/product/$DEVICE/boot.img dist/boot.img ROOTFS
-          (cd dist && zip -q lineage-15.1-*.zip boot.img)
+          (cd dist && for z in *.zip; do zip -q "$z" boot.img; done)
           (cd dist && sha256sum * | tee sha256sums.txt)
           # For checking the stock blobs against the libraries of this build
           tar -C /home/runner/out/target/product/$DEVICE/system -cf - lib lib64 | zstd -T0 -6 > system-libs.tar.zst
@@ -176,14 +204,16 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: /home/runner/ccache
-          key: ccache15-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stage }}
+          key: ccache-${{ inputs.rom }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stage }}
 
       - name: Upload the build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log-${{ inputs.stage }}
-          path: /home/runner/out/build.log
+          name: ${{ inputs.rom }}-build-log-${{ inputs.stage }}
+          path: |
+            /home/runner/out/sync.log
+            /home/runner/out/build.log
           if-no-files-found: ignore
           overwrite: true
 
@@ -191,12 +221,12 @@ jobs:
         if: steps.build.outputs.done == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: lineage-15.1-TB7304F
+          name: ${{ inputs.rom }}-8.1-TB7304F
           path: dist/*
 
       - name: Upload the system libraries
         if: steps.build.outputs.done == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: system-libs
+          name: ${{ inputs.rom }}-system-libs
           path: system-libs.tar.zst

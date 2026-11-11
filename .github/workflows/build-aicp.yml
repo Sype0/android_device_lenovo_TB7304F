@@ -1,0 +1,36 @@
+# Builds AICP (Android 8.1) for the Lenovo TB-7304F, in up to three stages.
+# The other ROMs of this branch build alongside it, each in its own run.
+name: Build AICP
+
+on:
+  push:
+    branches: [oreo-roms]
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+
+concurrency:
+  group: build-aicp-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stage1:
+    uses: ./.github/workflows/rom-stage.yml
+    with:
+      rom: aicp
+      stage: 1
+
+  stage2:
+    needs: stage1
+    if: needs.stage1.outputs.done == 'false'
+    uses: ./.github/workflows/rom-stage.yml
+    with:
+      rom: aicp
+      stage: 2
+
+  stage3:
+    needs: stage2
+    if: needs.stage2.outputs.done == 'false'
+    uses: ./.github/workflows/rom-stage.yml
+    with:
+      rom: aicp
+      stage: 3
