@@ -1,42 +1,57 @@
-# Puts the artifacts of a build into a draft release, which only the people
-# with write access see. Release assets download from other servers than the
-# artifacts do. Write "<run id> <artifact name>" into `request` and push.
-name: Draft release from a build
+# Publishes the artifacts of builds as pre-releases. Each line of `request` is
+# "<run id> <artifact name> <tag>", and notes/<tag>.md holds the title (first
+# line, after "# ") and the notes. Push to run.
+name: Release builds
 
 on:
   push:
     branches: [draft-release]
-    paths: [request]
+    paths: [request, notes/**, .github/workflows/draft-release.yml]
 
 permissions:
   contents: write
   actions: read
 
 jobs:
-  draft:
+  list:
     runs-on: ubuntu-22.04
+    outputs:
+      builds: ${{ steps.read.outputs.builds }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: |
+          echo "builds=$(awk 'NF==3 {printf "%s{\"run\":\"%s\",\"artifact\":\"%s\",\"tag\":\"%s\"}", n++?",":"[", $1, $2, $3} END {print "]"}' request)" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: list
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        build: ${{ fromJSON(needs.list.outputs.builds) }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read the request
-        run: |
-          read -r run artifact < request
-          echo "RUN=$run" >> "$GITHUB_ENV"
-          echo "ARTIFACT=$artifact" >> "$GITHUB_ENV"
-
       - uses: actions/download-artifact@v4
         with:
-          name: ${{ env.ARTIFACT }}
-          run-id: ${{ env.RUN }}
+          name: ${{ matrix.build.artifact }}
+          run-id: ${{ matrix.build.run }}
           github-token: ${{ github.token }}
           path: dist
 
-      - name: Create the draft release
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ matrix.build.tag }}
         run: |
           ls -l dist
           (cd dist && sha256sum -c sha256sums.txt)
-          gh release create "$ARTIFACT-$RUN" dist/* -R "$GITHUB_REPOSITORY" --draft \
-            --target oreo-roms --title "$ARTIFACT (run $RUN)" \
-            --notes "Untested build of run $RUN."
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "$TAG is already released"
+            exit 0
+          fi
+          title="$(head -n 1 "notes/$TAG.md" | sed 's/^# //') for TB-7304F (build ${TAG##*-build}, untested)"
+          { tail -n +2 "notes/$TAG.md"; echo; echo '**SHA-256**'; echo '```'; cat dist/sha256sums.txt; echo '```'; } > notes.md
+          gh release create "$TAG" dist/* -R "$GITHUB_REPOSITORY" --prerelease --latest=false \
+            --target oreo-roms --title "$title" --notes-file notes.md
