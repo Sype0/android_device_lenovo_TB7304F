@@ -6,4 +6,10 @@
   <project path="system/libhwbinder" name="LineageOS/android_system_libhwbinder" remote="github" revision="refs/heads/lineage-15.1" groups="pdk" />
   <remove-project name="platform/system/hwservicemanager" />
   <project path="system/hwservicemanager" name="LineageOS/android_system_hwservicemanager" remote="github" revision="refs/heads/lineage-15.1" groups="pdk" />
+  <!-- The frameworks/base of this ROM stops before SQLiteQueryBuilder learned
+       setStrictGrammar(): take the providers from before they use it -->
+  <remove-project name="LineageOS/android_packages_providers_DownloadProvider" />
+  <project path="packages/providers/DownloadProvider" name="LineageOS/android_packages_providers_DownloadProvider" remote="github" revision="dea9d8bdec120fb1e1fa44561fb1215034fba48f" groups="pdk-cw-fs,pdk-fs" />
+  <remove-project name="LineageOS/android_packages_providers_ContactsProvider" />
+  <project path="packages/providers/ContactsProvider" name="LineageOS/android_packages_providers_ContactsProvider" remote="github" revision="4dabe5308c84907c09cdba59bca482748aa6170c" groups="pdk-cw-fs,pdk-fs" />
 </manifest>

@@ -11,4 +11,8 @@
   <project path="external/chromium-webview" name="LineageOS/android_external_chromium-webview" remote="github" revision="master" clone-depth="1" groups="pdk" />
   <!-- Gone; Oreo leaves out the missing product package -->
   <remove-project name="crdroidandroid/android_packages_apps_crDroidFileManager" />
+  <!-- The frameworks/base of this ROM stops before SQLiteQueryBuilder learned
+       setStrictGrammar(): take the providers from before they use it -->
+  <remove-project name="LineageOS/android_packages_providers_ContactsProvider" />
+  <project path="packages/providers/ContactsProvider" name="LineageOS/android_packages_providers_ContactsProvider" remote="github" revision="4dabe5308c84907c09cdba59bca482748aa6170c" groups="pdk-cw-fs,pdk-fs" />
 </manifest>
