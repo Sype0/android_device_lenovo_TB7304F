@@ -162,6 +162,13 @@ jobs:
                 echo "$call: 1" >> frameworks/av/services/mediacodec/seccomp_policy/mediacodec-arm.policy
             done
             grep -q "^pselect6: 1" frameworks/av/services/mediacodec/seccomp_policy/mediacodec-arm.policy
+            # The LineageOS hwbinder checks against limits that an older
+            # system/core does not have yet; they are the ones of AOSP
+            if ! grep -qs NATIVE_HANDLE_MAX_FDS system/core/libcutils/include/cutils/native_handle.h; then
+              sed -i "0,/^namespace android/s//#ifndef NATIVE_HANDLE_MAX_FDS\n#define NATIVE_HANDLE_MAX_FDS 1024\n#define NATIVE_HANDLE_MAX_INTS 1024\n#endif\n\n&/" \
+                system/libhwbinder/Parcel.cpp
+              grep -q "define NATIVE_HANDLE_MAX_FDS" system/libhwbinder/Parcel.cpp
+            fi
             # The history is not needed to build, the space is
             rm -rf .repo/project-objects .repo/projects'
           df -h /
