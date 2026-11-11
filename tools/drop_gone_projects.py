@@ -25,9 +25,21 @@ default = root.find("default")
 default_remote = default.get("remote") if default is not None else None
 
 failed = set()
+listing = False
 for line in open(log, errors="replace"):
+    # Older repo: "error: Cannot fetch <name>", "error: <path>: ..."
     for m in re.finditer(r"Cannot fetch (\S+)|error: (\S+?): ", line):
         failed.add((m.group(1) or m.group(2)).rstrip(":"))
+    # Newer repo: "Unable to remote fetch project <name>", and a list of
+    # paths under "Failing repos (network):"
+    for m in re.finditer(r"Unable to (?:remote )?fetch project (\S+)", line):
+        failed.add(m.group(1))
+    if line.startswith("Failing repos"):
+        listing = True
+    elif listing and re.match(r"^[\w./+-]+$", line.strip()):
+        failed.add(line.strip())
+    else:
+        listing = False
 
 gone = set()
 if os.path.exists(out):

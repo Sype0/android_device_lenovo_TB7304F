@@ -3,4 +3,6 @@
 <manifest>
   <remove-project name="AICP/system_core" />
   <project path="system/core" name="LineageOS/android_system_core" remote="github" revision="refs/heads/lineage-15.1" groups="pdk" />
+  <!-- Gone from omnirom; Oreo leaves out the missing product package -->
+  <remove-project name="omnirom/android_packages_apps_OmniSwitch" />
 </manifest>
