@@ -19,4 +19,8 @@
        have yet: take it from before them -->
   <remove-project name="LineageOS/android_frameworks_opt_net_wifi" />
   <project path="frameworks/opt/net/wifi" name="LineageOS/android_frameworks_opt_net_wifi" remote="github" revision="8d04d5cba4de843a70a251391a113e0d91193273" groups="pdk" />
+  <!-- The 2026 MMS service passes the calling user to an IMms that this ROM
+       does not have yet: take it from before -->
+  <remove-project name="LineageOS/android_packages_services_Mms" />
+  <project path="packages/services/Mms" name="LineageOS/android_packages_services_Mms" remote="github" revision="3abc1b0a40acd30e72ddca74d4f16ec54da1af0b" />
 </manifest>

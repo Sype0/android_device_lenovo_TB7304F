@@ -12,4 +12,8 @@
   <project path="packages/providers/DownloadProvider" name="LineageOS/android_packages_providers_DownloadProvider" remote="github" revision="dea9d8bdec120fb1e1fa44561fb1215034fba48f" groups="pdk-cw-fs,pdk-fs" />
   <remove-project name="LineageOS/android_packages_providers_ContactsProvider" />
   <project path="packages/providers/ContactsProvider" name="LineageOS/android_packages_providers_ContactsProvider" remote="github" revision="4dabe5308c84907c09cdba59bca482748aa6170c" groups="pdk-cw-fs,pdk-fs" />
+  <!-- The 2026 MMS service passes the calling user to an IMms that this ROM
+       does not have yet: take it from before -->
+  <remove-project name="LineageOS/android_packages_services_Mms" />
+  <project path="packages/services/Mms" name="LineageOS/android_packages_services_Mms" remote="github" revision="3abc1b0a40acd30e72ddca74d4f16ec54da1af0b" />
 </manifest>

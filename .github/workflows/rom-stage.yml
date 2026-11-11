@@ -179,6 +179,8 @@ jobs:
           status=0
           docker exec -e DEVICE="$DEVICE" -e PREFIX="$PREFIX" build bash /src/in-container.sh bash -c '
             export OUT_DIR=/out
+            # Carry on past a failure, so that one build shows all of them
+            export NINJA_ARGS="-k 0"
             export USE_CCACHE=1 CCACHE_DIR=/ccache CCACHE_COMPRESS=1
             prebuilts/misc/linux-x86/ccache/ccache -M 5G > /dev/null
             export ANDROID_JACK_VM_ARGS="-Dfile.encoding=UTF-8 -XX:+TieredCompilation -Xmx6g"
