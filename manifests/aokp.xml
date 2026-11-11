@@ -3,4 +3,10 @@
 <manifest>
   <remove-project name="LineageOS/android_external_chromium-webview" />
   <project path="external/chromium-webview" name="LineageOS/android_external_chromium-webview" remote="los" revision="master" clone-depth="1" groups="pdk" />
+  <!-- The frameworks/base of AOKP stops before SQLiteQueryBuilder learned
+       setStrictGrammar(): take the providers from before they use it -->
+  <remove-project name="LineageOS/android_packages_providers_DownloadProvider" />
+  <project path="packages/providers/DownloadProvider" name="LineageOS/android_packages_providers_DownloadProvider" remote="los" revision="dea9d8bdec120fb1e1fa44561fb1215034fba48f" groups="pdk-cw-fs,pdk-fs" />
+  <remove-project name="LineageOS/android_packages_providers_ContactsProvider" />
+  <project path="packages/providers/ContactsProvider" name="LineageOS/android_packages_providers_ContactsProvider" remote="los" revision="4dabe5308c84907c09cdba59bca482748aa6170c" groups="pdk-cw-fs,pdk-fs" />
 </manifest>
