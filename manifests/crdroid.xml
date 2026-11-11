@@ -15,4 +15,8 @@
        setStrictGrammar(): take the providers from before they use it -->
   <remove-project name="LineageOS/android_packages_providers_ContactsProvider" />
   <project path="packages/providers/ContactsProvider" name="LineageOS/android_packages_providers_ContactsProvider" remote="github" revision="4dabe5308c84907c09cdba59bca482748aa6170c" groups="pdk-cw-fs,pdk-fs" />
+  <!-- The newer Wi-Fi service calls framework APIs that this ROM does not
+       have yet: take it from before them -->
+  <remove-project name="LineageOS/android_frameworks_opt_net_wifi" />
+  <project path="frameworks/opt/net/wifi" name="LineageOS/android_frameworks_opt_net_wifi" remote="github" revision="2293f56db188ccd951f78197eae4ade7af34113f" groups="pdk" />
 </manifest>
